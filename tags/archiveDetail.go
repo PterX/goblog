@@ -182,7 +182,7 @@ func (node *tagArchiveDetailNode) Execute(ctx *pongo2.ExecutionContext, writer p
 			userInfo, ok := ctx.Public["userInfo"].(*model.User)
 			if ok && userInfo.Id > 0 {
 				currUserId = userInfo.Id
-				discount := currentSite.GetUserDiscount(userInfo.Id, userInfo)
+				discount, _ := currentSite.GetUserDiscount(userInfo.Id, userInfo)
 				if discount > 0 {
 					archiveDetail.FavorablePrice = archiveDetail.Price * discount / 100
 				}
