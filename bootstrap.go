@@ -49,7 +49,7 @@ func (bootstrap *Bootstrap) Serve() {
 	}
 
 	//开始计划任务
-	crond.Crond()
+	//crond.Crond()
 
 	go bootstrap.Start()
 	go func() {
