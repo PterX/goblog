@@ -1242,6 +1242,7 @@ func (w *Website) restoreSingleData(name string, reader io.ReadCloser) {
 				_ = json.Unmarshal([]byte(v.Value), &systemSetting)
 				systemSetting.TemplateName = w.System.TemplateName
 				systemSetting.BaseUrl = w.System.BaseUrl
+				systemSetting.FrontUrl = w.System.FrontUrl
 				systemSetting.MobileUrl = w.System.MobileUrl
 				systemSetting.AdminUrl = w.System.AdminUrl
 				buf, err := json.Marshal(systemSetting)

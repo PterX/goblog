@@ -727,6 +727,16 @@ func (w *Website) SuccessRefundOrder(refund *model.OrderRefund, order *model.Ord
 	if err != nil {
 		//
 	}
+	// 退还库存
+	if order.Type != config.OrderTypeVip {
+		var details []*model.OrderDetail
+		w.DB.Where("order_id = ?", order.OrderId).Find(&details)
+		for _, detail := range details {
+			if detail.GoodsId > 0 {
+				w.DB.Model(&model.Archive{}).Where("id = ?", detail.GoodsId).UpdateColumn("stock", gorm.Expr("stock + ?", detail.Quantity))
+			}
+		}
+	}
 
 	tx.Commit()
 
@@ -823,6 +833,8 @@ func (w *Website) CreateOrder(userId uint, req *request.OrderRequest) (*model.Or
 	}
 	if orderAddress != nil {
 		order.AddressId = orderAddress.Id
+	} else if req.AddressId > 0 {
+		orderAddress, _ = w.GetOrderAddressById(req.AddressId)
 	}
 	err = tx.Save(&order).Error
 	if err != nil {
@@ -842,7 +854,7 @@ func (w *Website) CreateOrder(userId uint, req *request.OrderRequest) (*model.Or
 		//计算价格
 		price := group.Price
 		originPrice := price
-		discount := w.GetUserDiscount(userId, user)
+		discount, _ := w.GetUserDiscount(userId, user)
 		if discount > 0 {
 			price = price * discount / 100
 		}
@@ -880,7 +892,7 @@ func (w *Website) CreateOrder(userId uint, req *request.OrderRequest) (*model.Or
 			//计算价格
 			price := archive.Price
 			originPrice := price
-			discount := w.GetUserDiscount(userId, user)
+			discount, _ := w.GetUserDiscount(userId, user)
 			if discount > 0 {
 				price = price * discount / 100
 			}

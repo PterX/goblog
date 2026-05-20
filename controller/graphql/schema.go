@@ -347,6 +347,9 @@ func init() {
 			"favorite_count": &graphql.Field{
 				Type: graphql.Int,
 			},
+			"average_score": &graphql.Field{
+				Type: graphql.Float,
+			},
 			"option_type": &graphql.Field{
 				Type: graphql.Int,
 			},

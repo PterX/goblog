@@ -258,6 +258,9 @@ func InitWebsites() {
 				multiLangSites := w.GetMultiLangSites(w.Id, false)
 				w.MultiLanguage.SubSites = make([]config.MultiLangSite, 0, len(multiLangSites)*2)
 				mainBaseUrl := w.System.BaseUrl
+				if w.System.FrontUrl != "" {
+					mainBaseUrl = w.System.FrontUrl
+				}
 				for _, v := range multiLangSites {
 					tmpSite := config.MultiLangSite{
 						Id:           v.Id,
@@ -493,7 +496,7 @@ func matchByURIAndHost(sites []*Website, uri, host string, ctx iris.Context) *We
 			continue
 		}
 		// 检查所有相关URL配置
-		for _, urlToCheck := range []string{w.System.BaseUrl, w.System.MobileUrl, w.System.AdminUrl} {
+		for _, urlToCheck := range []string{w.System.BaseUrl, w.System.FrontUrl, w.System.MobileUrl, w.System.AdminUrl} {
 			if urlToCheck == "" {
 				continue
 			}
@@ -523,7 +526,7 @@ func matchRootAndFallback(sites []*Website, host string, ctx iris.Context) *Webs
 		if !w.Initialed {
 			continue
 		}
-		for _, urlToCheck := range []string{w.System.BaseUrl, w.System.MobileUrl, w.System.AdminUrl} {
+		for _, urlToCheck := range []string{w.System.BaseUrl, w.System.FrontUrl, w.System.MobileUrl, w.System.AdminUrl} {
 			if urlToCheck == "" {
 				continue
 			}
@@ -549,7 +552,11 @@ func matchRootAndFallback(sites []*Website, host string, ctx iris.Context) *Webs
 // 处理多语言配置
 func handleMultiLanguage(w *Website, host, uri string, ctx iris.Context) *Website {
 	// 多语言只根据 baseUrl 来处理
-	parsed, err := url.Parse(w.System.BaseUrl)
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
+	parsed, err := url.Parse(frontUrl)
 	if err != nil || parsed.Hostname() != host {
 		return nil
 	}

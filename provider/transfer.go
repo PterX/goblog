@@ -157,17 +157,21 @@ func (w *Website) GetTransferTask() *TransferWebsite {
 }
 
 func (w *Website) CreateTransferTask(website *request.TransferWebsite) (*TransferWebsite, error) {
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	w.transferWebsite = &TransferWebsite{
 		w:        w,
 		TargetId: website.TargetId,
 		Name:     website.Name,
-		BaseUrl:  strings.TrimRight(website.BaseUrl, "/"),
+		BaseUrl:  strings.TrimRight(frontUrl, "/"),
 		Token:    website.Token,
 		Provider: website.Provider,
 		Status:   0,
 	}
 	// 尝试链接文件
-	remoteUrl := w.transferWebsite.BaseUrl + "/" + w.transferWebsite.Provider + "2anqicms.php?a=config&from=anqicms&target_id=" + w.transferWebsite.TargetId
+	remoteUrl := frontUrl + "/" + w.transferWebsite.Provider + "2anqicms.php?a=config&from=anqicms&target_id=" + w.transferWebsite.TargetId
 	resp, err := library.Request(remoteUrl, &library.Options{Method: "POST", Type: "json", Data: w.transferWebsite})
 	if err != nil {
 		return nil, err

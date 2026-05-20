@@ -188,7 +188,11 @@ func (w *Website) SaveTag(req *request.PluginTag) (tag *model.Tag, err error) {
 		// 过滤外链
 		if w.Content.FilterOutlink == 1 || w.Content.FilterOutlink == 2 {
 			baseHost := ""
-			urls, err := url.Parse(w.System.BaseUrl)
+			frontUrl := w.System.BaseUrl
+			if w.System.FrontUrl != "" {
+				frontUrl = w.System.FrontUrl
+			}
+			urls, err := url.Parse(frontUrl)
 			if err == nil {
 				baseHost = urls.Host
 			}

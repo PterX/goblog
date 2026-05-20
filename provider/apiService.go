@@ -72,7 +72,7 @@ func (w *Website) ApiGetArchive(req *request.ApiArchiveRequest) (*model.Archive,
 	if req.UserId > 0 {
 		archive = w.CheckArchiveHasOrder(req.UserId, archive, req.UserGroup)
 		if archive.Price > 0 {
-			discount := w.GetUserDiscount(req.UserId, req.UserInfo)
+			discount, _ := w.GetUserDiscount(req.UserId, req.UserInfo)
 			if discount > 0 {
 				archive.FavorablePrice = archive.Price * discount / 100
 			}
@@ -101,6 +101,10 @@ func (w *Website) ApiGetArchive(req *request.ApiArchiveRequest) (*model.Archive,
 	if archive.Category != nil {
 		archive.Category.Link = w.GetUrl("category", archive.Category, 0)
 	}
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	// 读取 extraDate
 	archiveParams := w.GetArchiveExtra(archive.ModuleId, archive.Id, true)
 	archive.Extra = make(map[string]config.CustomField, len(archiveParams))
@@ -117,7 +121,7 @@ func (w *Website) ApiGetArchive(req *request.ApiArchiveRequest) (*model.Archive,
 				continue
 			}
 			if param.Type == config.CustomFieldTypeEditor && req.Render {
-				param.Value = library.MarkdownToHTML(fmt.Sprint(param.Value), w.System.BaseUrl, w.Content.FilterOutlink)
+				param.Value = library.MarkdownToHTML(fmt.Sprint(param.Value), frontUrl, w.Content.FilterOutlink)
 			} else if param.Type == config.CustomFieldTypeArchive {
 				// 列表
 				arcIds, ok := param.Value.([]int64)
@@ -167,7 +171,7 @@ func (w *Website) ApiGetArchive(req *request.ApiArchiveRequest) (*model.Archive,
 	if archive.ArchiveData != nil {
 		// convert markdown to html
 		if req.Render {
-			archive.ArchiveData.Content = library.MarkdownToHTML(archive.ArchiveData.Content, w.System.BaseUrl, w.Content.FilterOutlink)
+			archive.ArchiveData.Content = library.MarkdownToHTML(archive.ArchiveData.Content, frontUrl, w.Content.FilterOutlink)
 		}
 		re, _ := regexp.Compile(`(?i)<img.*?src="(.+?)".*?>`)
 		archive.ArchiveData.Content = re.ReplaceAllStringFunc(archive.ArchiveData.Content, func(s string) string {
@@ -176,7 +180,7 @@ func (w *Website) ApiGetArchive(req *request.ApiArchiveRequest) (*model.Archive,
 				return s
 			}
 			if !strings.HasPrefix(match[1], "http") {
-				res := w.System.BaseUrl + match[1]
+				res := frontUrl + match[1]
 				s = strings.Replace(s, match[1], res, 1)
 			}
 			return s
@@ -641,6 +645,8 @@ func (w *Website) ApiGetArchives(req *request.ApiArchiveListRequest) ([]*model.A
 						tx = tx.Where("`category_id` IN(?)", req.CategoryIds)
 					}
 				}
+			} else if req.ModuleId > 0 {
+				tx = tx.Where("`module_id` = ?", req.ModuleId)
 			}
 			if len(req.ExcludeCategoryIds) > 0 {
 				if w.Content.MultiCategory == 1 {
@@ -754,6 +760,10 @@ func (w *Website) ApiGetArchives(req *request.ApiArchiveListRequest) ([]*model.A
 
 	// 读取flags,content,extra
 	if len(archiveIds) > 0 {
+		frontUrl := w.System.BaseUrl
+		if w.System.FrontUrl != "" {
+			frontUrl = w.System.FrontUrl
+		}
 		if req.ShowFlag {
 			var flags []*model.ArchiveFlags
 			w.DB.WithContext(w.Ctx()).Model(&model.ArchiveFlag{}).Where("`archive_id` IN (?)", archiveIds).Select("archive_id", "GROUP_CONCAT(`flag`) as flags").Group("archive_id").Scan(&flags)
@@ -794,7 +804,7 @@ func (w *Website) ApiGetArchives(req *request.ApiArchiveListRequest) ([]*model.A
 				for _, d := range archiveData {
 					if d.Id == archives[i].Id {
 						if req.Render {
-							d.Content = library.MarkdownToHTML(d.Content, w.System.BaseUrl, w.Content.FilterOutlink)
+							d.Content = library.MarkdownToHTML(d.Content, frontUrl, w.Content.FilterOutlink)
 						}
 						archives[i].Content = d.Content
 						break
@@ -819,7 +829,7 @@ func (w *Website) ApiGetArchives(req *request.ApiArchiveListRequest) ([]*model.A
 							continue
 						}
 						if param.Type == config.CustomFieldTypeEditor && req.Render {
-							param.Value = library.MarkdownToHTML(fmt.Sprint(param.Value), w.System.BaseUrl, w.Content.FilterOutlink)
+							param.Value = library.MarkdownToHTML(fmt.Sprint(param.Value), frontUrl, w.Content.FilterOutlink)
 						} else if param.Type == config.CustomFieldTypeArchive {
 							// 列表
 							arcIds, ok := param.Value.([]int64)
@@ -1056,13 +1066,16 @@ func (w *Website) ApiGetArchiveParams(req *request.ApiArchiveRequest) ([]config.
 	if req.UserId > 0 {
 		archive = w.CheckArchiveHasOrder(req.UserId, archive, req.UserGroup)
 		if archive.Price > 0 {
-			discount := w.GetUserDiscount(req.UserId, req.UserInfo)
+			discount, _ := w.GetUserDiscount(req.UserId, req.UserInfo)
 			if discount > 0 {
 				archive.FavorablePrice = archive.Price * discount / 100
 			}
 		}
 	}
-
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	var extras = make(map[string]config.CustomField, len(archiveParams))
 	if len(archiveParams) > 0 {
 		for i := range archiveParams {
@@ -1077,7 +1090,7 @@ func (w *Website) ApiGetArchiveParams(req *request.ApiArchiveRequest) ([]config.
 				continue
 			}
 			if param.Type == config.CustomFieldTypeEditor && req.Render {
-				param.Value = library.MarkdownToHTML(fmt.Sprint(param.Value), w.System.BaseUrl, w.Content.FilterOutlink)
+				param.Value = library.MarkdownToHTML(fmt.Sprint(param.Value), frontUrl, w.Content.FilterOutlink)
 			} else if param.Type == config.CustomFieldTypeArchive {
 				// 列表
 				arcIds, ok := param.Value.([]int64)
@@ -1134,10 +1147,14 @@ func (w *Website) ApiGetCategory(req *request.ApiCategoryRequest) (*model.Catego
 		return nil, errors.New("no category found")
 	}
 
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	category.Thumb = category.GetThumb(w.PluginStorage.StorageUrl, w.GetDefaultThumb(int(category.Id)))
 	// convert markdown to html
 	if req.Render {
-		category.Content = library.MarkdownToHTML(category.Content, w.System.BaseUrl, w.Content.FilterOutlink)
+		category.Content = library.MarkdownToHTML(category.Content, frontUrl, w.Content.FilterOutlink)
 	}
 	category.Content = w.ReplaceContentUrl(category.Content, true)
 	// extra replace
@@ -1159,7 +1176,7 @@ func (w *Website) ApiGetCategory(req *request.ApiCategoryRequest) (*model.Catego
 					value, ok2 := categoryExtra[field.FieldName].(string)
 					if ok2 {
 						if field.Type == config.CustomFieldTypeEditor && req.Render {
-							value = library.MarkdownToHTML(value, w.System.BaseUrl, w.Content.FilterOutlink)
+							value = library.MarkdownToHTML(value, frontUrl, w.Content.FilterOutlink)
 						}
 						categoryExtra[field.FieldName] = w.ReplaceContentUrl(value, true)
 					}
@@ -1251,6 +1268,10 @@ func (w *Website) ApiGetTag(req *request.ApiTagRequest) (*model.Tag, error) {
 		return nil, errors.New("no tag found")
 	}
 
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	tagDetail.Link = w.GetUrl("tag", tagDetail, 0)
 	tagDetail.GetThumb(w.PluginStorage.StorageUrl, w.GetDefaultThumb(int(tagDetail.Id)))
 	tagContent, err := w.GetTagContentById(tagDetail.Id)
@@ -1258,7 +1279,7 @@ func (w *Website) ApiGetTag(req *request.ApiTagRequest) (*model.Tag, error) {
 		tagDetail.Content = tagContent.Content
 		// convert markdown to html
 		if req.Render {
-			tagDetail.Content = library.MarkdownToHTML(tagDetail.Content, w.System.BaseUrl, w.Content.FilterOutlink)
+			tagDetail.Content = library.MarkdownToHTML(tagDetail.Content, frontUrl, w.Content.FilterOutlink)
 		}
 		tagDetail.Extra = tagContent.Extra
 		if tagDetail.Extra != nil {
@@ -1277,7 +1298,7 @@ func (w *Website) ApiGetTag(req *request.ApiTagRequest) (*model.Tag, error) {
 						value, ok2 := tagDetail.Extra[field.FieldName].(string)
 						if ok2 {
 							if field.Type == config.CustomFieldTypeEditor && req.Render {
-								value = library.MarkdownToHTML(value, w.System.BaseUrl, w.Content.FilterOutlink)
+								value = library.MarkdownToHTML(value, frontUrl, w.Content.FilterOutlink)
 							}
 							tagDetail.Extra[field.FieldName] = w.ReplaceContentUrl(value, true)
 						}
@@ -1549,6 +1570,11 @@ func (w *Website) ApiGetIndexSetting() *config.IndexConfig {
 
 func (w *Website) ApiGetDiyFields(render bool) []config.CustomField {
 	fields := w.GetDiyFieldSetting()
+
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	var newFields = make([]config.CustomField, 0, len(fields))
 	for _, field := range fields {
 		if (field.Value == nil || field.Value == "" || field.Value == 0) &&
@@ -1563,7 +1589,7 @@ func (w *Website) ApiGetDiyFields(render bool) []config.CustomField {
 			value, ok2 := field.Value.(string)
 			if ok2 {
 				if field.Type == config.CustomFieldTypeEditor && render {
-					value = library.MarkdownToHTML(value, w.System.BaseUrl, w.Content.FilterOutlink)
+					value = library.MarkdownToHTML(value, frontUrl, w.Content.FilterOutlink)
 				}
 				field.Value = w.ReplaceContentUrl(value, true)
 			}

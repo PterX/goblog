@@ -68,10 +68,13 @@ func (w *Website) PushBing(list []string) error {
 	if bingApi == "" {
 		return errors.New(w.Tr("BingActivePushIsNotConfigured"))
 	}
-
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	// bing 推送有2种方式，一种是传统的api，另一种是 IndexNow
 	if strings.HasPrefix(bingApi, "https://www.bing.com/indexnow") {
-		baseUrl, err := url.Parse(w.System.BaseUrl)
+		baseUrl, err := url.Parse(frontUrl)
 		if err != nil {
 			return err
 		}
@@ -93,7 +96,7 @@ func (w *Website) PushBing(list []string) error {
 		postData := bingData2{
 			Host:        baseUrl.Host,
 			Key:         apiKey,
-			KeyLocation: w.System.BaseUrl + "/" + apiKey + ".txt",
+			KeyLocation: frontUrl + "/" + apiKey + ".txt",
 			UrlList:     list,
 		}
 		resp, body, errs := gorequest.New().Timeout(10*time.Second).Set("Content-Type", "application/json; charset=utf-8").Post(bingApi).Send(postData).End()
@@ -107,7 +110,7 @@ func (w *Website) PushBing(list []string) error {
 		w.logPushResult("bing", fmt.Sprintf("%v, %s", list, body))
 	} else {
 		postData := bingData{
-			SiteUrl: w.System.BaseUrl,
+			SiteUrl: frontUrl,
 			UrlList: list,
 		}
 

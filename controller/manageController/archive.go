@@ -193,9 +193,6 @@ func ArchiveList(ctx iris.Context) {
 
 	//读取列表的分类
 	categories := currentSite.GetCacheCategories()
-	for i := range categories {
-		categories[i].Link = currentSite.GetUrl("category", categories[i], 0)
-	}
 	// 模型
 	modules := currentSite.GetCacheModules()
 	for i, v := range archives {

@@ -67,6 +67,7 @@ func GetWebsiteInfo(ctx iris.Context) {
 	}
 	if website != nil {
 		result.BaseUrl = website.System.BaseUrl
+		result.FrontUrl = website.System.FrontUrl
 		result.Initialed = website.Initialed
 	}
 	if dbSite.Id == 1 {

@@ -75,7 +75,12 @@ func (w *Website) SaveMaterial(req *request.PluginMaterial) (material *model.Mat
 	req.Content = library.ReplaceSingleSpace(req.Content)
 	req.Content = w.ReplaceContentUrl(req.Content, false)
 	baseHost := ""
-	urls, err := url.Parse(w.System.BaseUrl)
+
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
+	urls, err := url.Parse(frontUrl)
 	if err == nil {
 		baseHost = urls.Host
 	}

@@ -31,6 +31,10 @@ func init() {
 
 func ProcessExtra(extraData model.ExtraData, fields []config.CustomField, currentSite *Website, render bool, fieldName string) model.ExtraData {
 	var extra = model.ExtraData{}
+	frontUrl := currentSite.System.BaseUrl
+	if currentSite.System.FrontUrl != "" {
+		frontUrl = currentSite.System.FrontUrl
+	}
 	for _, field := range fields {
 		if field.FieldName == "" && field.Name != "" {
 			field.FieldName = field.Name
@@ -51,7 +55,7 @@ func ProcessExtra(extraData model.ExtraData, fields []config.CustomField, curren
 			value, ok2 := extra[field.FieldName].(string)
 			if ok2 {
 				if field.Type == config.CustomFieldTypeEditor && render {
-					value = library.MarkdownToHTML(value, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+					value = library.MarkdownToHTML(value, frontUrl, currentSite.Content.FilterOutlink)
 				}
 				extra[field.FieldName] = currentSite.ReplaceContentUrl(value, true)
 			}

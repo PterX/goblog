@@ -68,8 +68,12 @@ func (w *Website) DeleteArchiveCache(id int64, urlToken string, link string) {
 	w.Cache.Delete("archive-" + urlToken)
 	// 同时清理html缓存，如果可以的话
 	if link != "" && w.PluginHtmlCache.Open != false {
+		frontUrl := w.System.BaseUrl
+		if w.System.FrontUrl != "" {
+			frontUrl = w.System.FrontUrl
+		}
 		cachePath := w.CachePath + "pc"
-		localPath := transToLocalPath(strings.TrimPrefix(link, w.System.BaseUrl), "")
+		localPath := transToLocalPath(strings.TrimPrefix(link, frontUrl), "")
 		cacheFile := cachePath + localPath
 		_ = os.Remove(cacheFile)
 		memCacheKey := fmt.Sprintf("html-%v-%s", false, localPath)
@@ -764,7 +768,12 @@ func (w *Website) SaveArchive(req *request.Archive) (*model.Archive, error) {
 	// todo 应该只替换 src,href 中的 baseUrl
 	req.Content = w.ReplaceContentUrl(req.Content, false)
 	baseHost := ""
-	urls, err := url.Parse(w.System.BaseUrl)
+
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
+	urls, err := url.Parse(frontUrl)
 	if err == nil {
 		baseHost = urls.Host
 	}
@@ -1104,7 +1113,12 @@ func (w *Website) SuccessReleaseArchive(archive *model.Archive, newPost bool) er
 			_ = w.SyncHtmlCacheToStorage(cachePath+"/index.html", "index.html")
 			// 生成文章页
 			link := w.GetUrl("archive", archive, 0)
-			link = strings.TrimPrefix(link, w.System.BaseUrl)
+
+			frontUrl := w.System.BaseUrl
+			if w.System.FrontUrl != "" {
+				frontUrl = w.System.FrontUrl
+			}
+			link = strings.TrimPrefix(link, frontUrl)
 			_ = w.GetAndCacheHtmlData(link, false)
 			if w.System.TemplateType != config.TemplateTypeAuto {
 				_ = w.GetAndCacheHtmlData(link, true)
@@ -1115,7 +1129,7 @@ func (w *Website) SuccessReleaseArchive(archive *model.Archive, newPost bool) er
 			category := w.GetCategoryFromCache(archive.CategoryId)
 			if category != nil {
 				link = w.GetUrl("category", category, 0)
-				link = strings.TrimPrefix(link, w.System.BaseUrl)
+				link = strings.TrimPrefix(link, frontUrl)
 				_ = w.GetAndCacheHtmlData(link, false)
 				if w.System.TemplateType != config.TemplateTypeAuto {
 					_ = w.GetAndCacheHtmlData(link, true)
@@ -1127,7 +1141,7 @@ func (w *Website) SuccessReleaseArchive(archive *model.Archive, newPost bool) er
 			tags := w.GetTagsByItemId(archive.Id)
 			if len(tags) > 0 {
 				link = w.GetUrl("tagIndex", nil, 0)
-				link = strings.TrimPrefix(link, w.System.BaseUrl)
+				link = strings.TrimPrefix(link, frontUrl)
 				// 先生成首页
 				_ = w.GetAndCacheHtmlData(link, false)
 				if w.System.TemplateType != config.TemplateTypeAuto {
@@ -1137,7 +1151,7 @@ func (w *Website) SuccessReleaseArchive(archive *model.Archive, newPost bool) er
 				_ = w.SyncHtmlCacheToStorage(tagPath, link)
 				for _, tag := range tags {
 					link = w.GetUrl("tag", tag, 0)
-					link = strings.TrimPrefix(link, w.System.BaseUrl)
+					link = strings.TrimPrefix(link, frontUrl)
 					_ = w.GetAndCacheHtmlData(link, false)
 					if w.System.TemplateType != config.TemplateTypeAuto {
 						_ = w.GetAndCacheHtmlData(link, true)
@@ -1949,6 +1963,10 @@ func (qia *QuickImportArchive) startZip(file multipart.File) error {
 		}
 	}
 
+	frontUrl := qia.w.System.BaseUrl
+	if qia.w.System.FrontUrl != "" {
+		frontUrl = qia.w.System.FrontUrl
+	}
 	var archives = make([]model.ArchiveDraft, 0, 2000)
 	for _, f := range zipReader.File {
 		qia.Finished++
@@ -2043,7 +2061,7 @@ func (qia *QuickImportArchive) startZip(file multipart.File) error {
 
 			articleContent = strings.TrimSpace(string(content))
 			if (fileExt == ".md" || content[0] != '<') && qia.w.Content.Editor != "markdown" {
-				articleContent = library.MarkdownToHTML(articleContent, qia.w.System.BaseUrl, qia.w.Content.FilterOutlink)
+				articleContent = library.MarkdownToHTML(articleContent, frontUrl, qia.w.Content.FilterOutlink)
 			}
 		} else {
 			// 不支持的文件类型，也跳过
@@ -2240,7 +2258,12 @@ func (qia *QuickImportArchive) startExcel(file multipart.File) error {
 		}
 	}
 	baseHost := ""
-	urls, err := url.Parse(qia.w.System.BaseUrl)
+
+	frontUrl := qia.w.System.BaseUrl
+	if qia.w.System.FrontUrl != "" {
+		frontUrl = qia.w.System.FrontUrl
+	}
+	urls, err := url.Parse(frontUrl)
 	if err == nil {
 		baseHost = urls.Host
 	}
@@ -2338,7 +2361,7 @@ func (qia *QuickImportArchive) startExcel(file multipart.File) error {
 		articleContent := strings.TrimSpace(row[existFields["content"]])
 		if len(articleContent) > 0 {
 			if (articleContent[0] != '<') && qia.w.Content.Editor != "markdown" {
-				articleContent = library.MarkdownToHTML(articleContent, qia.w.System.BaseUrl, qia.w.Content.FilterOutlink)
+				articleContent = library.MarkdownToHTML(articleContent, frontUrl, qia.w.Content.FilterOutlink)
 			}
 		}
 
