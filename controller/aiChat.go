@@ -606,11 +606,17 @@ func (ctrl *AiChatController) Health(ctx iris.Context) {
 	})
 }
 
-// getAllTools returns all available MCP tools
+// getAllTools returns all available MCP tools, built from the Eino tool definitions.
 func (svc *AiChatService) getAllTools() []*mcp.Tool {
-	// This would be populated when tools are registered
-	// For now, return empty list
-	return nil
+	toolInfos, _ := svc.getEinoTools()
+	tools := make([]*mcp.Tool, 0, len(toolInfos))
+	for _, ti := range toolInfos {
+		tools = append(tools, &mcp.Tool{
+			Name:        ti.Name,
+			Description: ti.Desc,
+		})
+	}
+	return tools
 }
 
 // buildAIResponse builds an AI response based on the user message
