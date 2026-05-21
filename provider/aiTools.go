@@ -1853,6 +1853,434 @@ SEO信息：
 			index.SeoTitle, index.SeoKeywords, index.SeoDescription), nil
 	})
 
+	// ---- Setting tools ----
+	add(&schema.ToolInfo{
+		Name: "setting_system_get",
+		Desc: "读取系统设置值。返回指定键的原始字符串值。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"key": {Type: schema.String, Desc: "设置键名", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Key == "" {
+			return "参数错误：必须提供 key", nil
+		}
+		val := w.GetSettingValue(args.Key)
+		return fmt.Sprintf("设置 %s = %s", args.Key, val), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "setting_system_set",
+		Desc: "修改系统设置值。注意：修改后立即生效。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"key":   {Type: schema.String, Desc: "设置键名", Required: true},
+			"value": {Type: schema.String, Desc: "设置值", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Key == "" {
+			return "参数错误：必须提供 key 和 value", nil
+		}
+		if err := w.SaveSettingValue(args.Key, args.Value); err != nil {
+			return fmt.Sprintf("保存失败: %s", err.Error()), nil
+		}
+		return fmt.Sprintf("设置 %s 已更新为 %s", args.Key, args.Value), nil
+	})
+
+	// ---- Sitemap & Push tools ----
+	add(&schema.ToolInfo{
+		Name: "sitemap_rebuild",
+		Desc: "重新生成站点地图(sitemap)。生成后搜索引擎能更快发现新内容。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		if err := w.BuildSitemap(); err != nil {
+			return fmt.Sprintf("生成 sitemap 失败: %s", err.Error()), nil
+		}
+		return "站点地图 sitemap 已重新生成", nil
+	})
+	add(&schema.ToolInfo{
+		Name: "url_push",
+		Desc: "推送指定的 URL 到百度、必应等搜索引擎，加快收录。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"url": {Type: schema.String, Desc: "要推送的完整 URL", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Url string `json:"url"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Url == "" {
+			return "参数错误：必须提供 url", nil
+		}
+		w.PushArchive(args.Url)
+		return fmt.Sprintf("URL 已推送到搜索引擎: %s", args.Url), nil
+	})
+
+	// ---- Comment tools ----
+	add(&schema.ToolInfo{
+		Name: "comment_list",
+		Desc: "查看评论列表，支持按文档ID筛选和排序。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"archive_id": {Type: schema.Integer, Desc: "文档ID（可选），按文章筛选评论"},
+			"page":       {Type: schema.Integer, Desc: "页码，从1开始，默认1"},
+			"page_size":  {Type: schema.Integer, Desc: "每页条数，默认20"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			ArchiveId int64 `json:"archive_id"`
+			Page      int   `json:"page"`
+			PageSize  int   `json:"page_size"`
+		}
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		if args.Page < 1 {
+			args.Page = 1
+		}
+		if args.PageSize < 1 || args.PageSize > 100 {
+			args.PageSize = 20
+		}
+		comments, total, err := w.GetCommentList(args.ArchiveId, 0, "", args.Page, args.PageSize, 0)
+		if err != nil {
+			return fmt.Sprintf("获取评论失败: %s", err.Error()), nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 条评论（当前页 %d 条）：\n\n", total, len(comments)))
+		for _, c := range comments {
+			status := "待审核"
+			if c.Status == 1 {
+				status = "正常"
+			} else if c.Status == 2 {
+				status = "疑似垃圾"
+			} else if c.Status == 3 {
+				status = "垃圾"
+			}
+			parentInfo := ""
+			if c.Parent != nil {
+				parentInfo = fmt.Sprintf(" [回复: %s]", c.Parent.UserName)
+			}
+			b.WriteString(fmt.Sprintf("#%d%s | %s | %s\n", c.Id, parentInfo, c.UserName, status))
+			b.WriteString(fmt.Sprintf("  内容: %s\n", c.Content))
+			if c.ItemTitle != "" {
+				b.WriteString(fmt.Sprintf("  文章: %s\n", c.ItemTitle))
+			}
+			b.WriteString("\n")
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "comment_approve",
+		Desc: "审核通过评论或回复评论。设置 status=1 为审核通过。也可以回复指定评论。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":      {Type: schema.Integer, Desc: "评论ID", Required: true},
+			"status":  {Type: schema.Integer, Desc: "状态：1=通过, 2=疑似垃圾, 3=垃圾"},
+			"content": {Type: schema.String, Desc: "回复内容（可选），填写则作为管理员回复"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Id      uint   `json:"id"`
+			Status  uint   `json:"status"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Id == 0 {
+			return "参数错误：必须提供评论 id", nil
+		}
+		req := &request.PluginComment{
+			Id:     args.Id,
+			Status: args.Status,
+		}
+		if args.Status == 0 {
+			req.Status = 1 // 默认通过
+		}
+		if args.Content != "" {
+			// 管理员回复 - 先获取原评论获取 archive_id
+			orig, err := w.GetCommentById(args.Id)
+			if err != nil {
+				return fmt.Sprintf("获取原评论失败: %s", err.Error()), nil
+			}
+			req.Content = args.Content
+			req.ArchiveId = orig.ArchiveId
+			req.UserName = "管理员"
+		}
+		if _, err := w.SaveComment(req); err != nil {
+			return fmt.Sprintf("操作失败: %s", err.Error()), nil
+		}
+		if args.Content != "" {
+			return fmt.Sprintf("评论 #%d 已回复", args.Id), nil
+		}
+		return fmt.Sprintf("评论 #%d 状态已更新为 %d", args.Id, req.Status), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "comment_delete",
+		Desc: "删除评论。注意：此操作不可恢复。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "评论ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args ArgId
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Id == 0 {
+			return "参数错误：必须提供评论 id", nil
+		}
+		comment, err := w.GetCommentById(uint(args.Id))
+		if err != nil {
+			return fmt.Sprintf("评论不存在: %s", err.Error()), nil
+		}
+		if err := comment.Delete(w.DB); err != nil {
+			return fmt.Sprintf("删除失败: %s", err.Error()), nil
+		}
+		return fmt.Sprintf("评论 #%d 已删除", args.Id), nil
+	})
+
+	// ---- Keyword tools ----
+	add(&schema.ToolInfo{
+		Name: "keyword_list",
+		Desc: "获取关键词库列表，支持关键词搜索。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"keyword":   {Type: schema.String, Desc: "搜索关键词（可选），按标题模糊搜索"},
+			"page":      {Type: schema.Integer, Desc: "页码，从1开始，默认1"},
+			"page_size": {Type: schema.Integer, Desc: "每页条数，默认20"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Keyword  string `json:"keyword"`
+			Page     int    `json:"page"`
+			PageSize int    `json:"page_size"`
+		}
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		if args.Page < 1 {
+			args.Page = 1
+		}
+		if args.PageSize < 1 || args.PageSize > 100 {
+			args.PageSize = 20
+		}
+		keywords, total, err := w.GetKeywordList(args.Keyword, args.Page, args.PageSize)
+		if err != nil {
+			return fmt.Sprintf("获取关键词列表失败: %s", err.Error()), nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 个关键词（当前页 %d 个）：\n\n", total, len(keywords)))
+		for _, k := range keywords {
+			b.WriteString(fmt.Sprintf("#%d | %s (分类ID:%d, 文章数:%d)\n", k.Id, k.Title, k.CategoryId, k.ArticleCount))
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "keyword_create",
+		Desc: "添加关键词到词库。如果关键词已存在则更新其分类。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"title":       {Type: schema.String, Desc: "关键词", Required: true},
+			"category_id": {Type: schema.Integer, Desc: "分类ID（可选）"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Title      string `json:"title"`
+			CategoryId uint   `json:"category_id"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Title == "" {
+			return "参数错误：必须提供 title", nil
+		}
+		keyword, err := w.GetKeywordByTitle(args.Title)
+		if err != nil {
+			keyword = &model.Keyword{
+				Title:      args.Title,
+				Status:     1,
+				CategoryId: args.CategoryId,
+			}
+		} else if args.CategoryId > 0 {
+			keyword.CategoryId = args.CategoryId
+		}
+		if err := keyword.Save(w.DB); err != nil {
+			return fmt.Sprintf("保存关键词失败: %s", err.Error()), nil
+		}
+		return fmt.Sprintf("关键词「%s」已保存（ID: %d）", keyword.Title, keyword.Id), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "keyword_delete",
+		Desc: "删除关键词。可以通过ID或标题删除。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":    {Type: schema.Integer, Desc: "关键词ID（与title二选一）"},
+			"title": {Type: schema.String, Desc: "关键词标题（与id二选一）"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Id    uint   `json:"id"`
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || (args.Id == 0 && args.Title == "") {
+			return "参数错误：必须提供 id 或 title", nil
+		}
+		var keyword *model.Keyword
+		var err error
+		if args.Id > 0 {
+			keyword, err = w.GetKeywordById(args.Id)
+		} else {
+			keyword, err = w.GetKeywordByTitle(args.Title)
+		}
+		if err != nil {
+			return fmt.Sprintf("未找到关键词: %s", err.Error()), nil
+		}
+		if err := keyword.Delete(w.DB); err != nil {
+			return fmt.Sprintf("删除失败: %s", err.Error()), nil
+		}
+		return fmt.Sprintf("关键词「%s」已删除", keyword.Title), nil
+	})
+
+	// ---- Anchor tool ----
+	add(&schema.ToolInfo{
+		Name: "anchor_list",
+		Desc: "获取锚文本链接列表，支持按关键词搜索。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"keyword":   {Type: schema.String, Desc: "搜索关键词（可选），按锚文本或链接模糊搜索"},
+			"page":      {Type: schema.Integer, Desc: "页码，从1开始，默认1"},
+			"page_size": {Type: schema.Integer, Desc: "每页条数，默认20"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Keyword  string `json:"keyword"`
+			Page     int    `json:"page"`
+			PageSize int    `json:"page_size"`
+		}
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		if args.Page < 1 {
+			args.Page = 1
+		}
+		if args.PageSize < 1 || args.PageSize > 100 {
+			args.PageSize = 20
+		}
+		anchors, total, err := w.GetAnchorList(args.Keyword, args.Page, args.PageSize)
+		if err != nil {
+			return fmt.Sprintf("获取锚文本列表失败: %s", err.Error()), nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 个锚文本（当前页 %d 个）：\n\n", total, len(anchors)))
+		for _, a := range anchors {
+			b.WriteString(fmt.Sprintf("#%d | %s → %s (权重:%d)\n", a.Id, a.Title, a.Link, a.Weight))
+		}
+		return b.String(), nil
+	})
+
+	// ---- Redirect tools ----
+	add(&schema.ToolInfo{
+		Name: "redirect_list",
+		Desc: "获取URL重定向列表，支持按来源URL搜索。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"keyword":   {Type: schema.String, Desc: "搜索关键词（可选），按from_url模糊搜索"},
+			"page":      {Type: schema.Integer, Desc: "页码，从1开始，默认1"},
+			"page_size": {Type: schema.Integer, Desc: "每页条数，默认20"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Keyword  string `json:"keyword"`
+			Page     int    `json:"page"`
+			PageSize int    `json:"page_size"`
+		}
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		if args.Page < 1 {
+			args.Page = 1
+		}
+		if args.PageSize < 1 || args.PageSize > 100 {
+			args.PageSize = 20
+		}
+		redirects, total, err := w.GetRedirectList(args.Keyword, args.Page, args.PageSize)
+		if err != nil {
+			return fmt.Sprintf("获取重定向列表失败: %s", err.Error()), nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 条重定向规则（当前页 %d 条）：\n\n", total, len(redirects)))
+		for _, r := range redirects {
+			b.WriteString(fmt.Sprintf("#%d | %s → %s\n", r.Id, r.FromUrl, r.ToUrl))
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "redirect_create",
+		Desc: "添加或更新URL重定向规则。如果来源URL已存在则更新目标URL，否则创建新规则。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"from_url": {Type: schema.String, Desc: "来源URL（被重定向的地址），支持相对路径如 /old-page.html 或完整URL", Required: true},
+			"to_url":   {Type: schema.String, Desc: "目标URL（重定向到的地址）", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args request.PluginRedirectRequest
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.FromUrl == "" || args.ToUrl == "" {
+			return "参数错误：必须提供 from_url 和 to_url", nil
+		}
+		// 标准化路径
+		if !strings.HasPrefix(args.FromUrl, "http") && !strings.HasPrefix(args.FromUrl, "/") {
+			args.FromUrl = "/" + args.FromUrl
+		}
+		if !strings.HasPrefix(args.ToUrl, "http") && !strings.HasPrefix(args.ToUrl, "/") {
+			args.ToUrl = "/" + args.ToUrl
+		}
+		if args.FromUrl == args.ToUrl {
+			return "错误：来源URL和目标URL不能相同", nil
+		}
+		redirect, err := w.GetRedirectByFromUrl(args.FromUrl)
+		if err != nil {
+			redirect = &model.Redirect{
+				FromUrl: args.FromUrl,
+			}
+		}
+		redirect.ToUrl = args.ToUrl
+		if err := w.DB.Save(redirect).Error; err != nil {
+			return fmt.Sprintf("保存重定向失败: %s", err.Error()), nil
+		}
+		w.DeleteCacheRedirects()
+		return fmt.Sprintf("重定向规则已保存：%s → %s（ID: %d）", redirect.FromUrl, redirect.ToUrl, redirect.Id), nil
+	})
+
 	// ---- Skill tools (progressive disclosure) ----
 	add(skillListTool())
 	add(skillGetTool())
