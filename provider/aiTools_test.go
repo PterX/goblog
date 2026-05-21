@@ -29,6 +29,10 @@ var expectedTools = []string{
 	"archive_create",
 	"archive_delete",
 	"archive_publish",
+	"module_list",
+	"module_get",
+	"module_create",
+	"module_delete",
 	"category_list",
 	"category_get",
 	"category_create",
@@ -444,5 +448,109 @@ func Test_UnknownTool(t *testing.T) {
 	_, exists := svc.Handlers["nonexistent_tool"]
 	if exists {
 		t.Fatal("handler for nonexistent tool should not exist")
+	}
+}
+
+func Test_ModuleList_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["module_list"]
+
+	// Even empty args should work (no params required)
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：站点未初始化" {
+		t.Fatalf("expected '站点未初始化', got %q", result)
+	}
+}
+
+func Test_ModuleGet_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["module_get"]
+
+	// Valid args
+	result, err := handler(context.Background(), `{"module_id":1}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：站点未初始化" {
+		t.Fatalf("expected '站点未初始化', got %q", result)
+	}
+
+	// Missing module_id
+	result, err = handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_ModuleCreate_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["module_create"]
+
+	// Valid args
+	result, err := handler(context.Background(), `{"title":"News","table_name":"news"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：站点未初始化" {
+		t.Fatalf("expected '站点未初始化', got %q", result)
+	}
+
+	// Missing title
+	result, err = handler(context.Background(), `{"table_name":"news"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：模型名称不能为空" {
+		t.Fatalf("expected '模型名称不能为空', got %q", result)
+	}
+
+	// Missing table_name
+	result, err = handler(context.Background(), `{"title":"News"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：表名不能为空" {
+		t.Fatalf("expected '表名不能为空', got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_ModuleDelete_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["module_delete"]
+
+	// Valid args
+	result, err := handler(context.Background(), `{"module_id":1}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：站点未初始化" {
+		t.Fatalf("expected '站点未初始化', got %q", result)
+	}
+
+	// Missing module_id
+	result, err = handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
 	}
 }
