@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -19,6 +20,12 @@ func testService() *AiChatService {
 		site:     nil,
 	}
 	svc.Tools, svc.Handlers = svc.getEinoTools()
+	// Also load built-in tools
+	builtinTools, builtinHandlers := svc.getBuiltinEinoTools()
+	svc.Tools = append(svc.Tools, builtinTools...)
+	for name, handler := range builtinHandlers {
+		svc.Handlers[name] = handler
+	}
 	return svc
 }
 
@@ -37,10 +44,33 @@ var expectedTools = []string{
 	"category_get",
 	"category_create",
 	"category_delete",
+	"page_list",
+	"page_get",
+	"page_create",
+	"page_delete",
 	"tag_list",
 	"tag_get",
 	"tag_create",
 	"tag_delete",
+	"archive_tag_update",
+	// Built-in file/shell tools
+	"read_file",
+	"write_file",
+	"edit_file",
+	"search_replace",
+	"bash",
+	"grep",
+	"glob",
+	"list_directory",
+	// Web tools
+	"web_fetch",
+	"web_search",
+	// Code intelligence tools
+	"list_symbols",
+	"read_symbol",
+	"find_references",
+	"file_deps",
+	"call_graph",
 }
 
 func TestGetEinoTools_AllDefined(t *testing.T) {
@@ -171,8 +201,8 @@ func Test_ArchiveCreate_ParseArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "错误：文章标题不能为空" {
-		t.Fatalf("expected '文章标题不能为空', got %q", result)
+	if result != "错误：文档标题不能为空" {
+		t.Fatalf("expected '文档标题不能为空', got %q", result)
 	}
 
 	// Missing content
@@ -180,8 +210,8 @@ func Test_ArchiveCreate_ParseArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "错误：文章内容不能为空" {
-		t.Fatalf("expected '文章内容不能为空', got %q", result)
+	if result != "错误：文档内容不能为空" {
+		t.Fatalf("expected '文档内容不能为空', got %q", result)
 	}
 
 	// Missing category_id
@@ -546,6 +576,481 @@ func Test_ModuleDelete_ParseArgs(t *testing.T) {
 	result, err = handler(context.Background(), `{}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+// --- Built-in tool tests ---
+
+func Test_ReadFile_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["read_file"]
+
+	// Empty path
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：文件路径不能为空" {
+		t.Fatalf("expected '文件路径不能为空', got %q", result)
+	}
+
+	// Nonexistent file
+	result, err = handler(context.Background(), `{"path":"nonexistent_file_xxx.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误：文件不存在") {
+		t.Fatalf("expected '文件不存在', got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_WriteFile_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["write_file"]
+
+	// Empty path
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：文件路径不能为空" {
+		t.Fatalf("expected '文件路径不能为空', got %q", result)
+	}
+
+	// Missing content — will still try because struct defaults to empty
+	result, err = handler(context.Background(), `{"path":"test.txt"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `invalid`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_EditFile_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["edit_file"]
+
+	// Empty path
+	result, err := handler(context.Background(), `{"search":"old","replace":"new"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：文件路径和搜索文本不能为空" {
+		t.Fatalf("expected '文件路径...不能为空', got %q", result)
+	}
+
+	// Empty search — path is empty, so same error
+	result, err = handler(context.Background(), `{"path":"x","search":"","replace":"y"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：文件路径和搜索文本不能为空" {
+		t.Fatalf("expected '文件路径...不能为空', got %q", result)
+	}
+
+	// Nonexistent file
+	result, err = handler(context.Background(), `{"path":"nonexistent.go","search":"old","replace":"new"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误：文件不存在") {
+		t.Fatalf("expected '文件不存在', got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_SearchReplace_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["search_replace"]
+
+	// Empty search
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：搜索文本不能为空" {
+		t.Fatalf("expected '搜索文本不能为空', got %q", result)
+	}
+
+	// Valid args — will try to glob and find no matches
+	result, err = handler(context.Background(), `{"search":"old","replace":"new","glob":"*.nonexistent"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "未找到匹配的文件" {
+		t.Fatalf("expected '未找到匹配的文件', got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_Bash_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["bash"]
+
+	// Empty command
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：命令不能为空" {
+		t.Fatalf("expected '命令不能为空', got %q", result)
+	}
+
+	// Simple command
+	result, err = handler(context.Background(), `{"command":"echo hello"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "hello") {
+		t.Fatalf("expected 'hello' in output, got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_Grep_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["grep"]
+
+	// Empty pattern
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：搜索模式不能为空" {
+		t.Fatalf("expected '搜索模式不能为空', got %q", result)
+	}
+
+	// Search for something that exists in the current file
+	result, err = handler(context.Background(), `{"pattern":"Test_Grep_ParseArgs","glob":"*_test.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Test_Grep_ParseArgs") {
+		t.Fatalf("expected to find pattern, got %q", result)
+	}
+
+	// Invalid regex
+	_, err = handler(context.Background(), `{"pattern":"[invalid"}`)
+	if err == nil {
+		t.Fatal("expected error for invalid regex")
+	}
+}
+
+func Test_Glob_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["glob"]
+
+	// Empty pattern
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：文件匹配模式不能为空" {
+		t.Fatalf("expected '文件匹配模式不能为空', got %q", result)
+	}
+
+	// Find Go files
+	result, err = handler(context.Background(), `{"pattern":"aiTools.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "aiTools.go") {
+		t.Fatalf("expected to find aiTools.go, got %q", result)
+	}
+
+	// Non-matching pattern
+	result, err = handler(context.Background(), `{"pattern":"*.nonexistent_extension"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "未找到匹配的文件") {
+		t.Fatalf("expected '未找到匹配的文件', got %q", result)
+	}
+}
+
+func Test_ListDirectory_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["list_directory"]
+
+	// Default (root)
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "📁") {
+		t.Fatalf("expected directory listing, got %q", result)
+	}
+
+	// Point to a file (not a dir)
+	result, err = handler(context.Background(), `{"path":"aiTools.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误") || !strings.Contains(result, "是一个文件") {
+		t.Fatalf("expected '是一个文件', got %q", result)
+	}
+
+	// Nonexistent directory
+	result, err = handler(context.Background(), `{"path":"nonexistent_dir_xyz"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误：目录不存在") {
+		t.Fatalf("expected '目录不存在', got %q", result)
+	}
+}
+
+func Test_ListSymbols_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["list_symbols"]
+
+	// Missing both file and package
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：请指定 file 或 package 参数" {
+		t.Fatalf("expected '请指定 file 或 package', got %q", result)
+	}
+
+	// Invalid file
+	result, err = handler(context.Background(), `{"file":"nonexistent_file.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误：文件不存在") {
+		t.Fatalf("expected '文件不存在', got %q", result)
+	}
+
+	// Valid file — should find exported functions/types
+	result, err = handler(context.Background(), `{"file":"aiTools.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "导出符号") && !strings.Contains(result, "未找到") {
+		t.Fatalf("unexpected result, got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_ReadSymbol_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["read_symbol"]
+
+	// Empty symbol
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：符号名称不能为空" {
+		t.Fatalf("expected '符号名称不能为空', got %q", result)
+	}
+
+	// Nonexistent symbol
+	result, err = handler(context.Background(), `{"symbol":"NonExistentSymbolXYZ"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "未找到符号") {
+		t.Fatalf("expected '未找到符号', got %q", result)
+	}
+
+	// Known symbol — will search all files
+	result, err = handler(context.Background(), `{"symbol":"ArgId","file":"aiTools.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "ArgId") {
+		t.Fatalf("expected 'ArgId', got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_FindReferences_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["find_references"]
+
+	// Empty symbol
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：符号名称不能为空" {
+		t.Fatalf("expected '符号名称不能为空', got %q", result)
+	}
+}
+
+func Test_FileDeps_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["file_deps"]
+
+	// Empty file
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：文件路径不能为空" {
+		t.Fatalf("expected '文件路径不能为空', got %q", result)
+	}
+
+	// Nonexistent file
+	result, err = handler(context.Background(), `{"file":"nonexistent.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误：文件不存在") {
+		t.Fatalf("expected '文件不存在', got %q", result)
+	}
+
+	// Valid file
+	result, err = handler(context.Background(), `{"file":"aiTools.go"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "标准库") && !strings.Contains(result, "内部包") && !strings.Contains(result, "外部依赖") {
+		t.Fatalf("expected package classification, got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_CallGraph_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["call_graph"]
+
+	// Empty symbol
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：符号名称不能为空" {
+		t.Fatalf("expected '符号名称不能为空', got %q", result)
+	}
+
+	// Nonexistent function
+	result, err = handler(context.Background(), `{"symbol":"NonExistentFuncXYZ"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "未找到函数") {
+		t.Fatalf("expected '未找到函数', got %q", result)
+	}
+
+	// Known function
+	result, err = handler(context.Background(), `{"symbol":"safePath"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "函数") && !strings.Contains(result, "未找到") {
+		t.Fatalf("unexpected result, got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_WebFetch_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["web_fetch"]
+
+	// Empty URL
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：URL 不能为空" {
+		t.Fatalf("expected 'URL 不能为空', got %q", result)
+	}
+
+	// Invalid URL scheme
+	result, err = handler(context.Background(), `{"url":"ftp://example.com"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误：URL 格式不正确") {
+		t.Fatalf("expected 'URL 格式不正确', got %q", result)
+	}
+
+	// Blocked localhost
+	result, err = handler(context.Background(), `{"url":"http://localhost:8080"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "错误：不允许访问内网地址") {
+		t.Fatalf("expected '不允许访问内网地址', got %q", result)
+	}
+
+	// Invalid JSON
+	_, err = handler(context.Background(), `bad`)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func Test_WebSearch_ParseArgs(t *testing.T) {
+	svc := testService()
+	handler := svc.Handlers["web_search"]
+
+	// Empty query
+	result, err := handler(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "错误：搜索关键词不能为空" {
+		t.Fatalf("expected '搜索关键词不能为空', got %q", result)
 	}
 
 	// Invalid JSON

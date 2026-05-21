@@ -134,6 +134,14 @@ func generateAIResponse(ctx context.Context, irisCtx iris.Context, sessionID str
 - module_create / module_list / module_get / module_delete: 模型管理
 - tag_create / tag_list / tag_get / tag_delete: 标签管理
 
+文件和代码工具：
+- read_file / write_file / edit_file / search_replace: 文件操作
+- bash: 运行 shell 命令（编译、测试等）
+- grep / glob / list_directory: 搜索和浏览项目文件
+- web_fetch / web_search: 互联网搜索
+- list_symbols / read_symbol / find_references: Go 代码分析
+- call_graph / file_deps: 代码依赖和调用关系
+
 在创建文章时，请先查看可用分类（使用 category_list 工具），然后选择合适的分类ID。
 在创建分类时，请先查看可用模型（使用 module_list 工具），然后选择合适的模型ID。
 请用中文回复，保持专业、友好的语气。
