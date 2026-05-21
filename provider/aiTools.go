@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"gorm.io/gorm"
 	"kandaoni.com/anqicms/config"
+	"kandaoni.com/anqicms/model"
 	"kandaoni.com/anqicms/provider/fulltext"
 	"kandaoni.com/anqicms/request"
 	"kandaoni.com/anqicms/response"
@@ -1501,6 +1502,355 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			return "", fmt.Errorf("删除附件失败: %w", err)
 		}
 		return fmt.Sprintf("附件 [%d] %s 已成功删除", attach.Id, attach.FileName), nil
+	})
+
+	// ---- Navigation tools ----
+	add(&schema.ToolInfo{
+		Name: "nav_list",
+		Desc: "获取导航菜单列表，按树形结构返回。type_id=1 为主导航，其他值可能对应不同导航位置。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"type_id":   {Type: schema.Integer, Desc: "导航类型ID，默认1（主导航）"},
+			"show_type": {Type: schema.String, Desc: "展示类型：list=平铺列表，children=树形结构（默认）"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			TypeId   uint   `json:"type_id"`
+			ShowType string `json:"show_type"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.TypeId == 0 {
+			args.TypeId = 1
+		}
+		if args.ShowType == "" {
+			args.ShowType = "children"
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		navs, err := w.GetNavList(args.TypeId, args.ShowType)
+		if err != nil {
+			return "", fmt.Errorf("获取导航列表失败: %w", err)
+		}
+		var b strings.Builder
+		if len(navs) == 0 {
+			b.WriteString("暂无导航菜单")
+		} else {
+			b.WriteString(fmt.Sprintf("共 %d 个导航项（type_id=%d）：\n\n", len(navs), args.TypeId))
+			var printNav func(navs []*model.Nav, depth int)
+			printNav = func(navs []*model.Nav, depth int) {
+				for _, n := range navs {
+					prefix := ""
+					for i := 0; i < depth; i++ {
+						prefix += "  "
+					}
+					navType := "系统"
+					switch n.NavType {
+					case model.NavTypeCategory:
+						navType = "分类"
+					case model.NavTypeOutlink:
+						navType = "外链"
+					case model.NavTypeArchive:
+						navType = "文档"
+					}
+					status := "启用"
+					if n.Status == 0 {
+						status = "禁用"
+					}
+					b.WriteString(fmt.Sprintf("%s- [%d] %s (类型:%s, 排序:%d, 状态:%s)\n", prefix, n.Id, n.Title, navType, n.Sort, status))
+					if len(n.NavList) > 0 {
+						printNav(n.NavList, depth+1)
+					}
+				}
+			}
+			printNav(navs, 0)
+		}
+		return b.String(), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "nav_create",
+		Desc: "创建或编辑导航菜单。如果指定ID则更新已有导航，否则创建新导航。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":          {Type: schema.Integer, Desc: "导航ID，留空表示创建新导航"},
+			"title":       {Type: schema.String, Desc: "导航显示名称", Required: true},
+			"sub_title":   {Type: schema.String, Desc: "副标题"},
+			"description": {Type: schema.String, Desc: "导航描述"},
+			"parent_id":   {Type: schema.Integer, Desc: "父导航ID，0表示顶级"},
+			"nav_type":    {Type: schema.Integer, Desc: "导航类型：0=系统页,1=分类,2=外链,3=文档"},
+			"page_id":     {Type: schema.Integer, Desc: "关联的页面ID（分类ID/文档ID等）"},
+			"type_id":     {Type: schema.Integer, Desc: "导航位置类型ID，默认1"},
+			"link":        {Type: schema.String, Desc: "外链URL（nav_type=2时必填）"},
+			"sort":        {Type: schema.Integer, Desc: "排序值，越小越靠前"},
+			"status":      {Type: schema.Integer, Desc: "状态：1=启用,0=禁用，默认1"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Id          uint   `json:"id"`
+			Title       string `json:"title"`
+			SubTitle    string `json:"sub_title"`
+			Description string `json:"description"`
+			ParentId    uint   `json:"parent_id"`
+			NavType     uint   `json:"nav_type"`
+			PageId      int64  `json:"page_id"`
+			TypeId      uint   `json:"type_id"`
+			Link        string `json:"link"`
+			Sort        uint   `json:"sort"`
+			Status      uint   `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Title == "" {
+			return "错误：导航显示名称不能为空", nil
+		}
+		if args.TypeId == 0 {
+			args.TypeId = 1
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		req := &request.NavConfig{
+			Id:          args.Id,
+			Title:       args.Title,
+			SubTitle:    args.SubTitle,
+			Description: args.Description,
+			ParentId:    args.ParentId,
+			NavType:     args.NavType,
+			PageId:      args.PageId,
+			TypeId:      args.TypeId,
+			Link:        args.Link,
+			Sort:        args.Sort,
+			Status:      args.Status,
+		}
+		if req.Status == 0 {
+			req.Status = 1
+		}
+		nav, err := w.SaveNav(req)
+		if err != nil {
+			return "", fmt.Errorf("保存导航失败: %w", err)
+		}
+		w.DeleteCacheNavs()
+		return fmt.Sprintf("导航 [%d] %s 已成功保存", nav.Id, nav.Title), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "nav_delete",
+		Desc: "删除导航菜单。注意：此操作不可恢复。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "要删除的导航ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args ArgId
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		nav, err := w.GetNavById(uint(args.Id))
+		if err != nil {
+			return "", fmt.Errorf("获取导航失败: %w", err)
+		}
+		err = nav.Delete(w.DB)
+		if err != nil {
+			return "", fmt.Errorf("删除导航失败: %w", err)
+		}
+		w.DeleteCacheNavs()
+		return fmt.Sprintf("导航 [%d] %s 已成功删除", nav.Id, nav.Title), nil
+	})
+
+	// ---- Friend link tools ----
+	add(&schema.ToolInfo{
+		Name: "friendlink_list",
+		Desc: "获取友情链接列表，按排序值排列。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		links, err := w.GetLinkList()
+		if err != nil {
+			return "", fmt.Errorf("获取友链列表失败: %w", err)
+		}
+		var b strings.Builder
+		if len(links) == 0 {
+			b.WriteString("暂无友情链接")
+		} else {
+			b.WriteString(fmt.Sprintf("共 %d 条友情链接：\n\n", len(links)))
+			for _, l := range links {
+				status := "待审"
+				if l.Status == model.LinkStatusOk {
+					status = "正常"
+				} else if l.Status == model.LinkStatusNofollow {
+					status = "nofollow"
+				} else if l.Status == model.LinkStatusNotTitle {
+					status = "缺少标题"
+				} else if l.Status == model.LinkStatusNotMatch {
+					status = "不匹配"
+				}
+				b.WriteString(fmt.Sprintf("- [%d] %s -> %s (状态:%s, 排序:%d)\n", l.Id, l.Title, l.Link, status, l.Sort))
+			}
+		}
+		return b.String(), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "friendlink_create",
+		Desc: "添加或更新友情链接。如果相同链接已存在则更新，否则创建新链接。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"title":     {Type: schema.String, Desc: "站点名称", Required: true},
+			"link":      {Type: schema.String, Desc: "站点URL", Required: true},
+			"back_link": {Type: schema.String, Desc: "回链URL（可选）"},
+			"my_title":  {Type: schema.String, Desc: "我方显示标题"},
+			"my_link":   {Type: schema.String, Desc: "我方链接"},
+			"contact":   {Type: schema.String, Desc: "联系方式（QQ/邮箱）"},
+			"remark":    {Type: schema.String, Desc: "备注"},
+			"nofollow":  {Type: schema.Integer, Desc: "是否nofollow：1=是,0=否"},
+			"sort":      {Type: schema.Integer, Desc: "排序值，越小越靠前"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Title    string `json:"title"`
+			Link     string `json:"link"`
+			BackLink string `json:"back_link"`
+			MyTitle  string `json:"my_title"`
+			MyLink   string `json:"my_link"`
+			Contact  string `json:"contact"`
+			Remark   string `json:"remark"`
+			Nofollow uint   `json:"nofollow"`
+			Sort     uint   `json:"sort"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Title == "" || args.Link == "" {
+			return "错误：站点名称和URL不能为空", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		friendLink, err := w.GetLinkByLinkAndTitle(args.Link, args.Title)
+		if err != nil {
+			friendLink = &model.Link{Status: 0}
+		}
+		friendLink.Title = args.Title
+		friendLink.Link = args.Link
+		friendLink.BackLink = args.BackLink
+		if args.MyTitle != "" {
+			friendLink.MyTitle = args.MyTitle
+		}
+		if args.MyLink != "" {
+			friendLink.MyLink = args.MyLink
+		}
+		if args.Contact != "" {
+			friendLink.Contact = args.Contact
+		}
+		if args.Remark != "" {
+			friendLink.Remark = args.Remark
+		}
+		friendLink.Nofollow = args.Nofollow
+		if args.Sort > 0 {
+			friendLink.Sort = args.Sort
+		}
+		if friendLink.Status == model.LinkStatusOk {
+			// 重新申请审核
+			friendLink.Status = 0
+		}
+		err = friendLink.Save(w.DB)
+		if err != nil {
+			return "", fmt.Errorf("保存友链失败: %w", err)
+		}
+		w.DeleteCacheIndex()
+		return fmt.Sprintf("友链 [%d] %s -> %s 已成功保存", friendLink.Id, friendLink.Title, friendLink.Link), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "friendlink_delete",
+		Desc: "删除友情链接。可以通过ID或URL+标题删除。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":    {Type: schema.Integer, Desc: "友链ID（与link二选一）"},
+			"link":  {Type: schema.String, Desc: "友链URL（与id二选一）"},
+			"title": {Type: schema.String, Desc: "友链标题（配合link使用）"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Id    uint   `json:"id"`
+			Link  string `json:"link"`
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		var friendLink *model.Link
+		var err error
+		if args.Id > 0 {
+			friendLink, err = w.GetLinkById(args.Id)
+		} else if args.Link != "" {
+			friendLink, err = w.GetLinkByLinkAndTitle(args.Link, args.Title)
+		} else {
+			return "错误：请提供友链ID或URL", nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("获取友链失败: %w", err)
+		}
+		err = friendLink.Delete(w.DB)
+		if err != nil {
+			return "", fmt.Errorf("删除友链失败: %w", err)
+		}
+		w.DeleteCacheIndex()
+		return fmt.Sprintf("友链 [%d] %s 已成功删除", friendLink.Id, friendLink.Title), nil
+	})
+
+	// ---- Website info tool ----
+	add(&schema.ToolInfo{
+		Name: "website_info",
+		Desc: "获取当前站点基本信息，包括站点名称、Logo、联系方式、备案号等。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		s := w.System
+		c := w.Content
+		contact := w.Contact
+		index := w.Index
+		return fmt.Sprintf(`站点信息：
+━━━━━━━━━━━━━━━━━━━━━
+名称: %s
+Logo: %s
+网址: %s
+IPC备案: %s
+版权信息: %s
+邮箱: %s
+电话: %s
+地址: %s
+━━━━━━━━━━━━━━━━━━━━━
+内容设置：
+远程下载: %d
+过滤外链: %d
+URL模式: %d
+默认模板: %s
+━━━━━━━━━━━━━━━━━━━━━
+SEO信息：
+标题: %s
+关键词: %s
+描述: %s`,
+			s.SiteName, s.SiteLogo, s.BaseUrl, s.SiteIcp,
+			s.SiteCopyright, contact.Email, contact.Cellphone, contact.Address,
+			c.RemoteDownload, c.FilterOutlink, c.UrlTokenType, s.TemplateName,
+			index.SeoTitle, index.SeoKeywords, index.SeoDescription), nil
 	})
 
 	// ---- Skill tools (progressive disclosure) ----
