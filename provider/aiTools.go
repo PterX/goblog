@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -2279,6 +2280,349 @@ SEO信息：
 		}
 		w.DeleteCacheRedirects()
 		return fmt.Sprintf("重定向规则已保存：%s → %s（ID: %d）", redirect.FromUrl, redirect.ToUrl, redirect.Id), nil
+	})
+
+	// ---- Statistics tools (P3) ----
+	add(&schema.ToolInfo{
+		Name: "statistic_dashboard",
+		Desc: "查看站点统计概览，包括文章数、分类数、链接数、留言数、流量和爬虫统计等。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"exact": {Type: schema.Boolean, Desc: "是否强制刷新缓存并取精确值（可选，默认false使用缓存）"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Exact bool `json:"exact"`
+		}
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		stat := w.GetStatisticsSummary(args.Exact)
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("📊 站点统计概览（精确模式: %v）\n\n", stat.Exact))
+		b.WriteString(fmt.Sprintf("📄 文章总数: %d\n", stat.ArchiveCount.Total))
+		b.WriteString(fmt.Sprintf("   ├ 上周新增: %d\n", stat.ArchiveCount.LastWeek))
+		b.WriteString(fmt.Sprintf("   ├ 今日发布: %d\n", stat.ArchiveCount.Today))
+		b.WriteString(fmt.Sprintf("   ├ 草稿: %d\n", stat.ArchiveCount.Draft))
+		b.WriteString(fmt.Sprintf("   └ 待发布: %d\n", stat.ArchiveCount.UnRelease))
+		if len(stat.ModuleCounts) > 0 {
+			b.WriteString(fmt.Sprintf("\n📂 各模型文章数:\n"))
+			for _, m := range stat.ModuleCounts {
+				b.WriteString(fmt.Sprintf("   ├ %s: %d\n", m.Name, m.Total))
+			}
+		}
+		b.WriteString(fmt.Sprintf("\n🏷️ 分类数: %d\n", stat.CategoryCount))
+		b.WriteString(fmt.Sprintf("🔗 友链数: %d\n", stat.LinkCount))
+		b.WriteString(fmt.Sprintf("💬 留言数: %d\n", stat.GuestbookCount))
+		b.WriteString(fmt.Sprintf("📋 页面数: %d\n", stat.PageCount))
+		b.WriteString(fmt.Sprintf("🖼️ 附件数: %d\n", stat.AttachmentCount))
+		b.WriteString(fmt.Sprintf("🧩 模板数: %d\n", stat.TemplateCount))
+		b.WriteString(fmt.Sprintf("\n🌐 流量 (今日/总计): %d / %d\n", stat.TrafficCount.Today, stat.TrafficCount.Total))
+		b.WriteString(fmt.Sprintf("🕷️ 爬虫 (今日/总计): %d / %d\n", stat.SpiderCount.Today, stat.SpiderCount.Total))
+		if stat.IncludeCount.BaiduCount > 0 || stat.IncludeCount.BingCount > 0 || stat.IncludeCount.SogouCount > 0 {
+			b.WriteString(fmt.Sprintf("\n🔍 搜索引擎收录:\n"))
+			if stat.IncludeCount.BaiduCount > 0 {
+				b.WriteString(fmt.Sprintf("   ├ 百度: %d\n", stat.IncludeCount.BaiduCount))
+			}
+			if stat.IncludeCount.BingCount > 0 {
+				b.WriteString(fmt.Sprintf("   ├ 必应: %d\n", stat.IncludeCount.BingCount))
+			}
+			if stat.IncludeCount.SogouCount > 0 {
+				b.WriteString(fmt.Sprintf("   └ 搜狗: %d\n", stat.IncludeCount.SogouCount))
+			}
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "statistic_spider",
+		Desc: "查看近30天的爬虫访问趋势数据（按天汇总各爬虫访问次数）。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		data := w.StatisticSpider()
+		if len(data) == 0 {
+			return "暂无可用的爬虫统计数据", nil
+		}
+		// 按日期汇总
+		agg := make(map[string]map[string]int)
+		for _, d := range data {
+			if agg[d.Date] == nil {
+				agg[d.Date] = make(map[string]int)
+			}
+			agg[d.Date][d.Label] += d.Value
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("🕷️ 近30天爬虫统计（共 %d 条记录）\n\n", len(data)))
+		// 表头
+		var dates []string
+		for date := range agg {
+			dates = append(dates, date)
+		}
+		sort.Strings(dates)
+		for _, date := range dates {
+			b.WriteString(fmt.Sprintf("📅 %s\n", date))
+			for spider, count := range agg[date] {
+				b.WriteString(fmt.Sprintf("   ├ %s: %d\n", spider, count))
+			}
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "statistic_traffic",
+		Desc: "查看近30天的网站流量趋势数据（PV/IP按天汇总）。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		data := w.StatisticTraffic()
+		if len(data) == 0 {
+			return "暂无可用的流量统计数据", nil
+		}
+		// 按日期 + 标签汇总
+		type dayStat struct {
+			PV int
+			IP int
+		}
+		agg := make(map[string]*dayStat)
+		for _, d := range data {
+			if agg[d.Date] == nil {
+				agg[d.Date] = &dayStat{}
+			}
+			if d.Label == "PV" {
+				agg[d.Date].PV += d.Value
+			} else if d.Label == "IP" {
+				agg[d.Date].IP += d.Value
+			}
+		}
+		var dates []string
+		for date := range agg {
+			dates = append(dates, date)
+		}
+		sort.Strings(dates)
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("🌐 近30天流量统计\n\n"))
+		b.WriteString(fmt.Sprintf("%-12s %8s %8s\n", "日期", "PV", "IP"))
+		b.WriteString(fmt.Sprintf("%-12s %8s %8s\n", "────", "──", "──"))
+		for _, date := range dates {
+			b.WriteString(fmt.Sprintf("%-12s %8d %8d\n", date, agg[date].PV, agg[date].IP))
+		}
+		return b.String(), nil
+	})
+
+	// ---- Plugin tools (P4) ----
+	add(&schema.ToolInfo{
+		Name: "plugin_robots_get",
+		Desc: "查看当前的 robots.txt 内容。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		robots := w.GetRobots()
+		if robots == "" {
+			return "robots.txt 文件不存在或为空", nil
+		}
+		return fmt.Sprintf("当前 robots.txt 内容：\n```\n%s\n```", robots), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "plugin_robots_set",
+		Desc: "修改 robots.txt 内容。注意：此操作会覆盖现有文件。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"content": {Type: schema.String, Desc: "完整的 robots.txt 文本内容", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Content == "" {
+			return "参数错误：必须提供 content", nil
+		}
+		if err := w.SaveRobots(args.Content); err != nil {
+			return fmt.Sprintf("保存 robots.txt 失败: %s", err.Error()), nil
+		}
+		return "robots.txt 已更新", nil
+	})
+	add(&schema.ToolInfo{
+		Name: "plugin_rewrite_get",
+		Desc: "查看当前的 URL 重写（伪静态）配置。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		if w.PluginRewrite == nil {
+			return "URL 重写配置为空", nil
+		}
+		modeStr := "未知"
+		switch w.PluginRewrite.Mode {
+		case 1:
+			modeStr = "模式1（通用模式）"
+		case 2:
+			modeStr = "模式2（命名模式2）"
+		case 3:
+			modeStr = "模式3（命名模式3）"
+		case 4:
+			modeStr = "模式4（正则模式）"
+		}
+		return fmt.Sprintf("URL 重写配置：\n模式: %s (%d)\n规则: %s", modeStr, w.PluginRewrite.Mode, w.PluginRewrite.Patten), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "plugin_htmlcache_build",
+		Desc: "生成静态 HTML 缓存。此操作会在后台异步执行，完成后能大幅提升页面访问速度。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		if w.PluginHtmlCache.Open == false {
+			return "HTML 缓存功能未开启，请先在后台配置开启", nil
+		}
+		go func() {
+			w.BuildIndexCache()
+			w.BuildArchiveCache()
+		}()
+		return "HTML 缓存生成任务已提交（首页+文章详情页），请在后台查看进度", nil
+	})
+	add(&schema.ToolInfo{
+		Name: "plugin_fulltext_rebuild",
+		Desc: "重建全文搜索索引。此操作会关闭现有索引并重新构建。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		if w.PluginFulltext == nil || !w.PluginFulltext.Open {
+			return "全文搜索功能未开启，请先在后台配置开启", nil
+		}
+		w.CloseFulltext()
+		go w.InitFulltext(true)
+		return "全文搜索索引重建任务已提交，后台异步执行中", nil
+	})
+	add(&schema.ToolInfo{
+		Name: "plugin_backup_dump",
+		Desc: "备份数据库。此操作会导出完整的数据库结构和数据到备份文件，后台异步执行。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		bs, err := w.NewBackup()
+		if err != nil {
+			return fmt.Sprintf("创建备份失败: %s", err.Error()), nil
+		}
+		go bs.BackupData()
+		return "数据库备份任务已提交，后台异步执行中", nil
+	})
+	add(&schema.ToolInfo{
+		Name: "user_list",
+		Desc: "查看用户列表。支持分页查询。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"page":      {Type: schema.Integer, Desc: "页码，从1开始，默认1"},
+			"page_size": {Type: schema.Integer, Desc: "每页条数，默认20"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Page     int `json:"page"`
+			PageSize int `json:"page_size"`
+		}
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		if args.Page < 1 {
+			args.Page = 1
+		}
+		if args.PageSize < 1 || args.PageSize > 100 {
+			args.PageSize = 20
+		}
+		users, total := w.GetUserList(nil, args.Page, args.PageSize)
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 个用户（当前页 %d 个）：\n\n", total, len(users)))
+		for _, u := range users {
+			status := "正常"
+			if u.Status == 0 {
+				status = "待审核"
+			} else if u.Status == -1 {
+				status = "禁用"
+			}
+			group := ""
+			if u.Group != nil {
+				group = u.Group.Title
+			}
+			b.WriteString(fmt.Sprintf("#%d | %s (%s) | %s | 余额:%d\n", u.Id, u.UserName, group, status, u.Balance))
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "order_list",
+		Desc: "查看订单列表。支持按用户ID、订单号、用户名、状态筛选。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"user_id":   {Type: schema.Integer, Desc: "用户ID（可选）"},
+			"order_id":  {Type: schema.String, Desc: "订单号（可选）"},
+			"user_name": {Type: schema.String, Desc: "用户名（可选），模糊搜索"},
+			"status":    {Type: schema.String, Desc: "订单状态：waiting(待支付), paid(已支付), delivery(发货中), finished(已完成), closed(已关闭)"},
+			"page":      {Type: schema.Integer, Desc: "页码，从1开始，默认1"},
+			"page_size": {Type: schema.Integer, Desc: "每页条数，默认20"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			UserId   uint   `json:"user_id"`
+			OrderId  string `json:"order_id"`
+			UserName string `json:"user_name"`
+			Status   string `json:"status"`
+			Page     int    `json:"page"`
+			PageSize int    `json:"page_size"`
+		}
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+		if args.Page < 1 {
+			args.Page = 1
+		}
+		if args.PageSize < 1 || args.PageSize > 100 {
+			args.PageSize = 20
+		}
+		orders, total := w.GetOrderList(args.UserId, args.OrderId, args.UserName, args.Status, args.Page, args.PageSize)
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 个订单（当前页 %d 个）：\n\n", total, len(orders)))
+		for _, o := range orders {
+			statusStr := "待支付"
+			switch o.Status {
+			case 0:
+				statusStr = "待支付"
+			case 1:
+				statusStr = "已支付"
+			case 2:
+				statusStr = "发货中"
+			case 3:
+				statusStr = "已完成"
+			case -1:
+				statusStr = "已关闭"
+			}
+			b.WriteString(fmt.Sprintf("#%d | %s | %s\n", o.Id, o.OrderId, statusStr))
+			b.WriteString(fmt.Sprintf("  金额: %.2f | 用户ID: %d | 时间: %s\n",
+				float64(o.Amount)/100, o.UserId,
+				time.Unix(o.CreatedTime, 0).Format("2006-01-02 15:04")))
+		}
+		return b.String(), nil
 	})
 
 	// ---- Skill tools (progressive disclosure) ----
