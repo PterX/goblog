@@ -24,25 +24,33 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/cloudwego/eino/schema"
+	"kandaoni.com/anqicms/config"
 )
 
 // ---- Arg types for built-in tools ----
 
 type fileReadArgs struct {
-	Path   string `json:"path"`
-	Offset int    `json:"offset"`
-	Limit  int    `json:"limit"`
+	Path     string `json:"path"`
+	FilePath string `json:"file_path"`
+	Offset   int    `json:"offset"`
+	Limit    int    `json:"limit"`
 }
 
 type fileWriteArgs struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
+	Path     string `json:"path"`
+	FilePath string `json:"file_path"`
+	Content  string `json:"content"`
 }
 
 type fileEditArgs struct {
-	Path    string `json:"path"`
-	Search  string `json:"search"`
-	Replace string `json:"replace"`
+	Path      string `json:"path"`
+	FilePath  string `json:"file_path"`
+	Search    string `json:"search"`
+	Replace   string `json:"replace"`
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
 }
 
 type searchReplaceArgs struct {
@@ -90,14 +98,23 @@ type importArgs struct {
 	File string `json:"file"`
 }
 
-// ---- Project root (safe boundary) ----
+// ---- Project root & cache path (safe boundary) ----
+// All file operations are restricted to projectRoot.
+// Temporary/generated files (scripts, etc.) must be written to cachePath.
 
 var projectRoot string
+var cachePath string
 
 func init() {
-	wd, err := os.Getwd()
-	if err == nil {
-		projectRoot = wd
+	if config.ExecPath != "" {
+		projectRoot = strings.TrimSuffix(config.ExecPath, "/")
+		cachePath = config.ExecPath + "cache"
+	} else {
+		wd, err := os.Getwd()
+		if err == nil {
+			projectRoot = wd
+			cachePath = filepath.Join(wd, "cache")
+		}
 	}
 }
 
@@ -139,97 +156,162 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 
 	add(&schema.ToolInfo{
 		Name: "read_file",
-		Desc: "读取项目内文件的内容。支持 offset（起始行号，从1开始）和 limit（最大行数）参数分段读取大文件。",
+		Desc: "读取项目内文件的内容。支持 offset（起始行号，从1开始）和 limit（最大行数）参数分段读取大文件。大文件（超过300行）会显示骨架结构。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"path":   {Type: schema.String, Desc: "文件路径，相对项目根目录或绝对路径", Required: true},
-			"offset": {Type: schema.Integer, Desc: "起始行号（从1开始），可选"},
-			"limit":  {Type: schema.Integer, Desc: "最大读取行数，可选"},
+			"file_path": {Type: schema.String, Desc: "文件路径，相对项目根目录或绝对路径", Required: true},
+			"offset":    {Type: schema.Integer, Desc: "起始行号（从1开始），可选"},
+			"limit":     {Type: schema.Integer, Desc: "最大读取行数，可选"},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args fileReadArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		if err := rawJSONUnmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
-		if args.Path == "" {
+		path := args.Path
+		if path == "" {
+			path = args.FilePath
+		}
+		if path == "" {
 			return "错误：文件路径不能为空", nil
 		}
-		fullPath, err := safePath(args.Path)
+
+		// Check for sensitive paths before resolving
+		if isSensitiveInputPath(path) {
+			return "错误：禁止访问系统敏感路径", nil
+		}
+
+		fullPath, err := safePathResolve(path)
 		if err != nil {
-			return "错误：" + err.Error(), nil
+			return friendlyPathError(err), nil
 		}
 		info, err := os.Stat(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Sprintf("错误：文件不存在: %s", args.Path), nil
+				// Show file-not-found suggestions
+				similar := findSimilarFiles(path, 20)
+				msg := fmt.Sprintf("错误：文件不存在: %s", path)
+				if len(similar) > 0 {
+					msg += "\n\n您是不是要查找：\n"
+					for _, s := range similar {
+						rel, _ := filepath.Rel(projectRoot, s)
+						msg += fmt.Sprintf("  %s\n", rel)
+					}
+				}
+				return msg, nil
 			}
 			return "", fmt.Errorf("访问文件失败: %w", err)
 		}
 		if info.IsDir() {
-			return fmt.Sprintf("错误：%s 是一个目录，请使用 list_directory 查看目录内容", args.Path), nil
+			return fmt.Sprintf("错误：%s 是一个目录，请使用 list_directory 查看目录内容", path), nil
 		}
 		if info.Size() > 5*1024*1024 {
 			return "错误：文件超过 5MB 限制，无法读取", nil
 		}
 
-		f, err := os.Open(fullPath)
+		// Check cache
+		mtime := info.ModTime()
+		offset := args.Offset
+		limit := args.Limit
+		if offset == 0 && limit == 0 {
+			if cached, ok := getReadCache(fullPath, 0, 0, mtime); ok {
+				return cached, nil
+			}
+		}
+
+		data, err := os.ReadFile(fullPath)
 		if err != nil {
-			return "", fmt.Errorf("打开文件失败: %w", err)
-		}
-		defer f.Close()
-
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-		var b strings.Builder
-		lineNum := 0
-		maxLines := 10000
-		startLine := args.Offset
-		if startLine <= 0 {
-			startLine = 1
-		}
-		for scanner.Scan() {
-			lineNum++
-			if lineNum < startLine {
-				continue
-			}
-			b.WriteString(fmt.Sprintf("%6d| %s\n", lineNum, scanner.Text()))
-			if args.Limit > 0 && lineNum >= startLine+args.Limit-1 {
-				break
-			}
-			if lineNum >= startLine+maxLines-1 {
-				b.WriteString(fmt.Sprintf("\n... (文件较大，仅显示前 %d 行)", maxLines))
-				break
-			}
-		}
-		if err := scanner.Err(); err != nil {
 			return "", fmt.Errorf("读取文件失败: %w", err)
 		}
-		result := b.String()
-		if result == "" {
-			result = "(空文件或起始行超出范围)"
-		}
+
 		relPath, _ := filepath.Rel(projectRoot, fullPath)
-		return fmt.Sprintf("文件: %s\n总大小: %d 字节\n\n%s", relPath, info.Size(), result), nil
+		lines := strings.Split(string(data), "\n")
+		totalLines := len(lines)
+
+		// Header
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("文件: %s (%d 行, %d 字节)\n\n", relPath, totalLines, info.Size()))
+
+		if offset > totalLines {
+			return fmt.Sprintf("文件: %s (%d 行)\n\n起始行号 %d 超出文件总行数 %d", relPath, totalLines, offset, totalLines), nil
+		}
+
+		// Handle offset/limit
+		if offset > 0 || limit > 0 {
+			startLine := offset
+			if startLine <= 0 {
+				startLine = 1
+			}
+			endLine := len(lines)
+			if limit > 0 {
+				endLine = startLine + limit - 1
+				if endLine > len(lines) {
+					endLine = len(lines)
+				}
+			}
+			for i := startLine - 1; i < endLine; i++ {
+				b.WriteString(fmt.Sprintf("%6d| %s\n", i+1, lines[i]))
+			}
+			result := b.String()
+			setReadCache(fullPath, offset, limit, mtime, result)
+			return result, nil
+		}
+
+		// Skeleton mode for large files (>300 lines)
+		if totalLines > SkeletonThreshold {
+			skeleton := buildSkeleton(data, fullPath, relPath, totalLines)
+			result := skeleton
+			if result != "" {
+				setReadCache(fullPath, 0, 0, mtime, result)
+				return result, nil
+			}
+		}
+
+		// Full content for smaller files
+		maxLines := 10000
+		for i := 0; i < totalLines && i < maxLines; i++ {
+			b.WriteString(fmt.Sprintf("%6d| %s\n", i+1, lines[i]))
+		}
+		if totalLines > maxLines {
+			b.WriteString(fmt.Sprintf("\n... (文件较大，仅显示前 %d 行)", maxLines))
+		}
+		result := b.String()
+		setReadCache(fullPath, 0, 0, mtime, result)
+		return result, nil
 	})
 
 	add(&schema.ToolInfo{
 		Name: "write_file",
-		Desc: "写入或创建文件。如果文件已存在则覆盖。会自动创建父目录。注意：只能操作项目目录内的文件。",
+		Desc: "写入或创建文件。如果文件已存在则覆盖。会自动创建父目录。注意：只能操作项目目录内的文件。临时脚本（py/sh等）请写入 cache/ 目录（projectRoot + \"cache/\"）。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"path":    {Type: schema.String, Desc: "文件路径，相对项目根目录或绝对路径", Required: true},
-			"content": {Type: schema.String, Desc: "文件内容", Required: true},
+			"file_path": {Type: schema.String, Desc: "文件路径，相对项目根目录或绝对路径", Required: true},
+			"content":   {Type: schema.String, Desc: "文件内容", Required: true},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args fileWriteArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		if err := rawJSONUnmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Path == "" {
+			args.Path = args.FilePath
 		}
 		if args.Path == "" {
 			return "错误：文件路径不能为空", nil
 		}
-		fullPath, err := safePath(args.Path)
+		if isSensitiveInputPath(args.Path) {
+			return "错误：禁止写入系统敏感路径", nil
+		}
+		fullPath, err := safePathResolve(args.Path)
 		if err != nil {
-			return "错误：" + err.Error(), nil
+			return friendlyPathError(err), nil
+		}
+		// Check if overwriting an existing file
+		if info, err := os.Stat(fullPath); err == nil {
+			oldSize := info.Size()
+			newSize := len(args.Content)
+			relPath, _ := filepath.Rel(projectRoot, fullPath)
+			if newSize < int(oldSize/2) && oldSize > 100 {
+				return fmt.Sprintf("⚠ 警告：文件 %s 将缩小超过 50%%（从 %d 字节到 %d 字节），是否确认？请检查内容是否完整。", relPath, oldSize, newSize), nil
+			}
 		}
 		// Create parent directories
 		parent := filepath.Dir(fullPath)
@@ -239,49 +321,101 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		if err := os.WriteFile(fullPath, []byte(args.Content), 0644); err != nil {
 			return "", fmt.Errorf("写入文件失败: %w", err)
 		}
+		// Invalidate cache
+		invalidateReadCache(fullPath)
 		relPath, _ := filepath.Rel(projectRoot, fullPath)
 		return fmt.Sprintf("文件写入成功: %s (%d 字节)", relPath, len(args.Content)), nil
 	})
 
 	add(&schema.ToolInfo{
 		Name: "edit_file",
-		Desc: "在单个文件中搜索文本并替换为新的文本。使用 old_string 精确匹配要替换的内容，new_string 指定替换后的内容。支持文件路径参数。",
+		Desc: "编辑文件内容。支持两种模式：\n1. 文本模式：指定 search/old_string 和 replace/new_string 进行精确文本替换\n2. 行模式：指定 start_line、end_line 和 new_string 替换整段行\n如果 search 或 old_string 参数为空，则自动切换到行模式。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"path":    {Type: schema.String, Desc: "文件路径", Required: true},
-			"search":  {Type: schema.String, Desc: "要搜索的旧文本（精确匹配）", Required: true},
-			"replace": {Type: schema.String, Desc: "替换后的新文本", Required: true},
+			"file_path":  {Type: schema.String, Desc: "文件路径", Required: true},
+			"search":     {Type: schema.String, Desc: "（文本模式）要搜索的旧文本"},
+			"replace":    {Type: schema.String, Desc: "（文本模式）替换后的新文本"},
+			"old_string": {Type: schema.String, Desc: "（文本模式）要搜索的旧文本（同 search）"},
+			"new_string": {Type: schema.String, Desc: "（行模式）替换后的新文本"},
+			"start_line": {Type: schema.Integer, Desc: "（行模式）起始行号（从1开始）"},
+			"end_line":   {Type: schema.Integer, Desc: "（行模式）结束行号（从1开始），默认等于 start_line"},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args fileEditArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		if err := rawJSONUnmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
-		if args.Path == "" || args.Search == "" {
+		path := args.Path
+		if path == "" {
+			path = args.FilePath
+		}
+
+		// Detect which mode to use
+		searchText := args.Search
+		if searchText == "" {
+			searchText = args.OldString
+		}
+		replaceText := args.Replace
+		if replaceText == "" {
+			replaceText = args.NewString
+		}
+
+		if path == "" {
 			return "错误：文件路径和搜索文本不能为空", nil
 		}
-		fullPath, err := safePath(args.Path)
+		if searchText == "" && args.StartLine == 0 && args.EndLine == 0 {
+			return "错误：文件路径和搜索文本不能为空", nil
+		}
+
+		fullPath, err := safePath(path)
 		if err != nil {
 			return "错误：" + err.Error(), nil
 		}
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Sprintf("错误：文件不存在: %s", args.Path), nil
+				return fmt.Sprintf("错误：文件不存在: %s", path), nil
 			}
 			return "", fmt.Errorf("读取文件失败: %w", err)
 		}
-		oldStr := args.Search
-		newStr := args.Replace
+
+		// Line mode: replace lines start_line-end_line with new_string
+		if args.StartLine > 0 && replaceText != "" && searchText == "" {
+			content := string(data)
+			endLine := args.EndLine
+			if endLine <= 0 {
+				endLine = args.StartLine
+			}
+			result := applyLineEdit(content, args.StartLine, endLine, replaceText)
+			if err := os.WriteFile(fullPath, []byte(result), 0644); err != nil {
+				return "", fmt.Errorf("写入文件失败: %w", err)
+			}
+			invalidateReadCache(fullPath)
+			relPath, _ := filepath.Rel(projectRoot, fullPath)
+			return fmt.Sprintf("文件 %s 已更新（行 %d-%d 已替换）", relPath, args.StartLine, endLine), nil
+		}
+
+		// Text mode: search and replace
+		oldStr := searchText
 		if !strings.Contains(string(data), oldStr) {
+			// Try closest match for better error message
+			line, hint := findClosestMatch(string(data), oldStr)
+			if line > 0 {
+				return hint, nil
+			}
 			return "错误：未找到匹配的文本，请检查搜索内容", nil
 		}
-		result := strings.ReplaceAll(string(data), oldStr, newStr)
+		result := strings.Replace(string(data), oldStr, replaceText, 1)
 		if err := os.WriteFile(fullPath, []byte(result), 0644); err != nil {
 			return "", fmt.Errorf("写入文件失败: %w", err)
 		}
+		invalidateReadCache(fullPath)
 		count := strings.Count(string(data), oldStr)
 		relPath, _ := filepath.Rel(projectRoot, fullPath)
-		return fmt.Sprintf("文件 %s 已更新，共替换 %d 处", relPath, count), nil
+		msg := fmt.Sprintf("文件 %s 已更新，共替换 1 处", relPath)
+		if count > 1 {
+			msg += fmt.Sprintf("\n(注：文件中包含 %d 处匹配，仅替换第 1 处。如需全部替换请使用 search_replace 工具)", count)
+		}
+		return msg, nil
 	})
 
 	add(&schema.ToolInfo{
@@ -436,14 +570,14 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 
 	add(&schema.ToolInfo{
 		Name: "bash",
-		Desc: "在项目根目录执行 shell 命令。用于运行构建、测试、代码生成等开发命令。注意：不能使用交互式命令。",
+		Desc: "在项目根目录执行 shell 命令。用于运行构建、测试、代码生成等开发命令。注意：不能使用交互式命令。临时生成的文件（脚本、输出等）请写入 cache/ 目录。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"command": {Type: schema.String, Desc: "要执行的 shell 命令", Required: true},
 			"timeout": {Type: schema.Integer, Desc: "超时时间（秒），默认 30，最大 120"},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args bashArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		if err := rawJSONUnmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
 		if args.Command == "" {
@@ -453,19 +587,9 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			args.Timeout = 30
 		}
 
-		// Security checks
-		lower := strings.ToLower(strings.TrimSpace(args.Command))
-		dangerous := []string{
-			"rm -rf /", "rm -rf ~", "rm -rf .",
-			"dd if=", "mkfs", "fdisk", "mkswap",
-			"sudo", "su ", "chmod 777", "chown",
-			":(){ :|:& };:", "reboot", "shutdown", "halt",
-			"poweroff", "init 0", "init 6",
-		}
-		for _, d := range dangerous {
-			if strings.Contains(lower, d) {
-				return fmt.Sprintf("错误：检测到危险命令 '%s'，已阻止执行", d), nil
-			}
+		// Improved security checks
+		if msg, dangerous := dangerousCommand(args.Command); dangerous {
+			return msg, nil
 		}
 
 		var cmd *exec.Cmd
@@ -523,7 +647,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args grepArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		if err := rawJSONUnmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
 		if args.Pattern == "" {
@@ -533,9 +657,14 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			args.Context = 0
 		}
 
+		// Try as regex first, fall back to literal string if it fails
 		re, err := regexp.Compile(args.Pattern)
 		if err != nil {
-			return "", fmt.Errorf("正则表达式编译失败: %w", err)
+			// Escape the pattern so it matches literally
+			re, err = regexp.Compile(regexp.QuoteMeta(args.Pattern))
+			if err != nil {
+				return "", fmt.Errorf("正则表达式编译失败: %w", err)
+			}
 		}
 
 		type match struct {
@@ -819,7 +948,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args webFetchArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		if err := rawJSONUnmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
 		if args.URL == "" {
@@ -832,11 +961,9 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			return "错误：URL 格式不正确，仅支持 http/https", nil
 		}
 
-		// Block private IPs and localhost
+		// Block private IPs and localhost with proper DNS resolution
 		host := parsedURL.Hostname()
-		if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" ||
-			strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "172.16.") ||
-			strings.HasPrefix(host, "192.168.") || host == "::1" {
+		if isPrivateNetwork(host) {
 			return "错误：不允许访问内网地址", nil
 		}
 

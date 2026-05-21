@@ -4,6 +4,7 @@ import (
 	stdContext "context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"kandaoni.com/anqicms/crond"
 	"kandaoni.com/anqicms/library"
 	"kandaoni.com/anqicms/middleware"
+	"kandaoni.com/anqicms/pkg/ai/eino"
+	"kandaoni.com/anqicms/pkg/mcp/server"
 	"kandaoni.com/anqicms/provider"
 	"kandaoni.com/anqicms/route"
 	"kandaoni.com/anqicms/tags"
@@ -43,6 +46,32 @@ func (bootstrap *Bootstrap) loadGlobalMiddleware() {
 }
 
 func (bootstrap *Bootstrap) Serve() {
+	// 启动mcp服务器
+	mcpCfg := server.DefaultConfig()
+	mcpCfg.Logger = slog.Default()
+	mcpSrv, err := server.New(mcpCfg)
+	if err != nil {
+		slog.Error("Failed to create MCP server", "error", err)
+	} else {
+		slog.Info("MCP Server initialized")
+	}
+	provider.SetMcpServer(mcpSrv)
+	// 临时放在这里，后续调整
+	// Initialize DeepSeek AI client
+	einoCfg := &eino.Config{
+		APIKey:      "sk-REMOVED",
+		Model:       "deepseek-v4-flash",
+		BaseURL:     "https://api.deepseek.com",
+		MaxTokens:   8192,
+		Temperature: 0.7,
+	}
+	if err := eino.SetGlobalConfig(einoCfg); err != nil {
+		slog.Error("Failed to initialize AI client", "error", err)
+	} else {
+		slog.Info("DeepSeek AI client initialized successfully")
+	}
+	// end
+
 	//自动迁移表
 	if provider.GetDefaultDB() != nil {
 		provider.InitWebsites()

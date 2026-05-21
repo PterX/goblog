@@ -1,18 +1,11 @@
 package route
 
 import (
-	"log/slog"
-
 	"github.com/kataras/iris/v12"
 	"kandaoni.com/anqicms/controller"
 	"kandaoni.com/anqicms/controller/graphql"
 	"kandaoni.com/anqicms/middleware"
-	"kandaoni.com/anqicms/pkg/ai/eino"
-	"kandaoni.com/anqicms/pkg/mcp/server"
 )
-
-// aiChatController holds the AI chat controller instance
-var aiChatController *controller.AiChatController
 
 func Register(app *iris.Application) {
 	//注册macros
@@ -157,32 +150,6 @@ func Register(app *iris.Application) {
 	{
 		returnParty.Get("/paypal/pay", controller.PaypalReturnResult)
 		returnParty.Get("/paypal/cancel", controller.PaypalCancelResult)
-	}
-
-	// Initialize MCP Server and AI Chat Controller
-	mcpCfg := server.DefaultConfig()
-	mcpCfg.Logger = slog.Default()
-	mcpSrv, err := server.New(mcpCfg)
-	if err != nil {
-		slog.Error("Failed to create MCP server", "error", err)
-	} else {
-		aiSrv := controller.NewAiChatService(mcpSrv)
-		aiChatController = controller.NewAiChatController(aiSrv)
-		slog.Info("AI Chat Controller initialized")
-	}
-
-	// Initialize DeepSeek AI client
-	einoCfg := &eino.Config{
-		APIKey:      "sk-REMOVED",
-		Model:       "deepseek-v4-flash",
-		BaseURL:     "https://api.deepseek.com",
-		MaxTokens:   8192,
-		Temperature: 0.7,
-	}
-	if err := eino.SetGlobalConfig(einoCfg); err != nil {
-		slog.Error("Failed to initialize AI client", "error", err)
-	} else {
-		slog.Info("DeepSeek AI client initialized successfully")
 	}
 
 	//后台管理路由相关

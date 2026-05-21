@@ -57,7 +57,7 @@ func initPath() {
 	if strings.Contains(baseName, "go_build") || strings.Contains(ExecPath, "go-build") || strings.Contains(baseName, "Test") {
 		ExecPath, _ = os.Getwd()
 	}
-	if strings.Contains(baseName, "Test") {
+	if strings.Contains(baseName, "Test") || strings.Contains(ExecPath, "/provider") {
 		ExecPath = filepath.Dir(ExecPath)
 	}
 	length := utf8.RuneCountInString(ExecPath)

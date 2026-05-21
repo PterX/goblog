@@ -53,6 +53,13 @@ var expectedTools = []string{
 	"tag_create",
 	"tag_delete",
 	"archive_tag_update",
+	// Template tools
+	"template_get_info",
+	"template_get_file",
+	"template_modify_file",
+	"template_get_static",
+	"template_modify_static",
+	"template_reload",
 	// Built-in file/shell tools
 	"read_file",
 	"write_file",
@@ -765,10 +772,12 @@ func Test_Grep_ParseArgs(t *testing.T) {
 		t.Fatalf("expected to find pattern, got %q", result)
 	}
 
-	// Invalid regex
-	_, err = handler(context.Background(), `{"pattern":"[invalid"}`)
-	if err == nil {
-		t.Fatal("expected error for invalid regex")
+	// Invalid regex — now uses literal fallback instead of error
+	// The `[invalid` is treated as literal and searches the whole project.
+	// It may or may not find a match, but should never error.
+	result, err = handler(context.Background(), `{"pattern":"[invalid","glob":"*.txt"}`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -818,7 +827,7 @@ func Test_ListDirectory_ParseArgs(t *testing.T) {
 	}
 
 	// Point to a file (not a dir)
-	result, err = handler(context.Background(), `{"path":"aiTools.go"}`)
+	result, err = handler(context.Background(), `{"path":"provider/aiTools.go"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -859,7 +868,7 @@ func Test_ListSymbols_ParseArgs(t *testing.T) {
 	}
 
 	// Valid file — should find exported functions/types
-	result, err = handler(context.Background(), `{"file":"aiTools.go"}`)
+	result, err = handler(context.Background(), `{"file":"provider/aiTools.go"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -892,12 +901,12 @@ func Test_ReadSymbol_ParseArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "未找到符号") {
+	if !strings.Contains(result, "未找到符号") && !strings.Contains(result, "项目中有") {
 		t.Fatalf("expected '未找到符号', got %q", result)
 	}
 
 	// Known symbol — will search all files
-	result, err = handler(context.Background(), `{"symbol":"ArgId","file":"aiTools.go"}`)
+	result, err = handler(context.Background(), `{"symbol":"ArgId","file":"provider/aiTools.go"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -949,7 +958,7 @@ func Test_FileDeps_ParseArgs(t *testing.T) {
 	}
 
 	// Valid file
-	result, err = handler(context.Background(), `{"file":"aiTools.go"}`)
+	result, err = handler(context.Background(), `{"file":"provider/aiTools.go"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

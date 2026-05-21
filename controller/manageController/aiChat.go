@@ -146,6 +146,12 @@ func generateAIResponse(ctx context.Context, irisCtx iris.Context, sessionID str
 在创建分类时，请先查看可用模型（使用 module_list 工具），然后选择合适的模型ID。
 请用中文回复，保持专业、友好的语气。
 
+技能系统(Skills):
+- skill_list: 列出所有可用技能。当用户任务需要专业指导时先调用此工具。
+- skill_get: 加载指定技能的完整内容。先确认技能匹配再调用。
+- skill_reload: 管理员编辑技能后使用。
+处理专业任务时，先查看可用技能，再加载匹配的技能内容并遵循其指导。
+
 用户的操作都会在当前站点中执行，请根据实际情况使用工具。`
 
 	currentSite := provider.CurrentSite(irisCtx)

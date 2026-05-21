@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"golang.org/x/oauth2"
+	"kandaoni.com/anqicms/pkg/mcp/server"
 	"kandaoni.com/anqicms/provider/storage"
 
 	"github.com/esap/wechat"
@@ -113,6 +114,18 @@ type Website struct {
 	backLanguage string
 	ctx          iris.Context // 这个类型是指针，因此只能在拷贝后赋值
 	Template     *StoreTemplates
+	// ai
+	AiSrv *AiChatService
+}
+
+var mcpServer *server.Server
+
+func SetMcpServer(mcpSrv *server.Server) {
+	mcpServer = mcpSrv
+}
+
+func GetMcpServer() *server.Server {
+	return mcpServer
 }
 
 func (w *Website) Ctx() context.Context {
@@ -384,6 +397,8 @@ func InitWebsite(mw *model.Website) {
 		w.InitCacheBucket()
 		w.InitCache()
 		w.InitAkismet()
+		// AI
+		w.NewAiChatService()
 		// 初始化索引,异步处理
 		go w.InitFulltext(false)
 	}
