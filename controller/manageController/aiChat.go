@@ -235,8 +235,14 @@ func generateAIResponse(ctx context.Context, irisCtx iris.Context, sessionID str
 		}
 
 		// ---- Execute tool calls ----
-		// Add the assistant's message (with tool calls) to the history
-		assistantMsg := schema.AssistantMessage(fullResponse.String(), roundToolCalls)
+		// Add the assistant's message (with tool calls and reasoning content) to the history
+		// DeepSeek requires that reasoning_content be passed back when thinking mode is used.
+		assistantMsg := &schema.Message{
+			Role:             schema.Assistant,
+			Content:          fullResponse.String(),
+			ToolCalls:        roundToolCalls,
+			ReasoningContent: fullReasoning.String(),
+		}
 		messages = append(messages, assistantMsg)
 
 		// Execute each tool
