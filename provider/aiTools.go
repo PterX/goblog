@@ -1236,6 +1236,273 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		return fmt.Sprintf("模板重载信号已发送，模板将在1秒内重新加载。当前模板：%s", w.System.TemplateName), nil
 	})
 
+	// ---- Category Update ----
+	add(&schema.ToolInfo{
+		Name: "category_update",
+		Desc: "更新已有分类的标题、描述、关键词、父分类等信息。需要传入分类ID，至少传入一个要更新的字段。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":          {Type: schema.Integer, Desc: "要更新的分类ID", Required: true},
+			"title":       {Type: schema.String, Desc: "新的分类名称"},
+			"description": {Type: schema.String, Desc: "新的分类描述"},
+			"keywords":    {Type: schema.String, Desc: "新的分类关键词"},
+			"parent_id":   {Type: schema.Integer, Desc: "新的父分类ID，0表示顶级分类"},
+			"sort":        {Type: schema.Integer, Desc: "排序值，越小越靠前"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Id          uint   `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Keywords    string `json:"keywords"`
+			ParentID    uint   `json:"parent_id"`
+			Sort        uint   `json:"sort"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id == 0 {
+			return "错误：分类ID不能为空", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		cat, err := w.GetCategoryById(args.Id)
+		if err != nil {
+			return "", fmt.Errorf("获取分类失败: %w", err)
+		}
+		req := &request.Category{
+			Id:        cat.Id,
+			Title:     cat.Title,
+			Keywords:  cat.Keywords,
+			ParentId:  cat.ParentId,
+			Sort:      cat.Sort,
+			Status:    cat.Status,
+			Type:      cat.Type,
+			ModuleId:  cat.ModuleId,
+			Images:    cat.Images,
+			IsInherit: cat.IsInherit,
+		}
+		changed := false
+		if args.Title != "" {
+			req.Title = args.Title
+			changed = true
+		}
+		if args.Description != "" {
+			req.Description = args.Description
+			changed = true
+		}
+		if args.Keywords != "" {
+			req.Keywords = args.Keywords
+			changed = true
+		}
+		req.ParentId = args.ParentID
+		changed = true
+		if args.Sort > 0 {
+			req.Sort = args.Sort
+			changed = true
+		}
+		if !changed {
+			return "未提供要更新的字段", nil
+		}
+		cat, err = w.SaveCategory(req)
+		if err != nil {
+			return "", fmt.Errorf("更新分类失败: %w", err)
+		}
+		return fmt.Sprintf("分类 [%d] %s 已成功更新", cat.Id, cat.Title), nil
+	})
+
+	// ---- Tag Update ----
+	add(&schema.ToolInfo{
+		Name: "tag_update",
+		Desc: "更新已有标签的标题、描述等信息。需要传入标签ID，至少传入一个要更新的字段。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":          {Type: schema.Integer, Desc: "要更新的标签ID", Required: true},
+			"title":       {Type: schema.String, Desc: "新的标签名称"},
+			"description": {Type: schema.String, Desc: "新的标签描述"},
+			"category_id": {Type: schema.Integer, Desc: "标签分类ID"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Id          uint   `json:"id"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			CategoryID  uint   `json:"category_id"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id == 0 {
+			return "错误：标签ID不能为空", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		tag, err := w.GetTagById(args.Id)
+		if err != nil {
+			return "", fmt.Errorf("获取标签失败: %w", err)
+		}
+		req := &request.PluginTag{
+			Id:          tag.Id,
+			Title:       tag.Title,
+			Description: tag.Description,
+			CategoryId:  tag.CategoryId,
+		}
+		changed := false
+		if args.Title != "" {
+			req.Title = args.Title
+			changed = true
+		}
+		if args.Description != "" {
+			req.Description = args.Description
+			changed = true
+		}
+		if args.CategoryID > 0 {
+			req.CategoryId = args.CategoryID
+			changed = true
+		}
+		if !changed {
+			return "未提供要更新的字段", nil
+		}
+		tag, err = w.SaveTag(req)
+		if err != nil {
+			return "", fmt.Errorf("更新标签失败: %w", err)
+		}
+		return fmt.Sprintf("标签 [%d] %s 已成功更新", tag.Id, tag.Title), nil
+	})
+
+	// ---- Attachment Tools ----
+	add(&schema.ToolInfo{
+		Name: "attachment_list",
+		Desc: "分页获取附件列表，支持按分类和关键词过滤。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"page":        {Type: schema.Integer, Desc: "页码，从1开始，默认1"},
+			"page_size":   {Type: schema.Integer, Desc: "每页数量，最大100，默认10"},
+			"category_id": {Type: schema.Integer, Desc: "附件分类ID，筛选指定分类"},
+			"keyword":     {Type: schema.String, Desc: "搜索关键词，匹配文件名"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Page       int    `json:"page"`
+			PageSize   int    `json:"page_size"`
+			CategoryID uint   `json:"category_id"`
+			Keyword    string `json:"keyword"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Page <= 0 {
+			args.Page = 1
+		}
+		if args.PageSize <= 0 || args.PageSize > 100 {
+			args.PageSize = 10
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		attachments, total, err := w.GetAttachmentList(args.CategoryID, args.Keyword, args.Page, args.PageSize)
+		if err != nil {
+			return "", fmt.Errorf("获取附件列表失败: %w", err)
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 个附件（当前页 %d 个）：\n\n", total, len(attachments)))
+		for _, a := range attachments {
+			a.GetThumb(w.PluginStorage.StorageUrl)
+			imgType := "文件"
+			if a.IsImage == 1 {
+				imgType = "图片"
+			}
+			b.WriteString(fmt.Sprintf("- [%d] %s (%s, %d×%d) %s\n", a.Id, a.FileName, imgType, a.Width, a.Height, a.Logo))
+		}
+		return b.String(), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "attachment_get",
+		Desc: "获取单个附件的详细信息，包括URL。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "附件ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args ArgId
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		a, err := w.GetAttachmentById(uint(args.Id))
+		if err != nil {
+			return "", fmt.Errorf("获取附件失败: %w", err)
+		}
+		a.GetThumb(w.PluginStorage.StorageUrl)
+		imgType := "文件"
+		if a.IsImage == 1 {
+			imgType = "图片"
+		}
+		return fmt.Sprintf("附件信息：\nID: %d\n文件名: %s\n类型: %s\n尺寸: %d×%d\n大小: %d 字节\nURL: %s\n缩略图: %s",
+			a.Id, a.FileName, imgType, a.Width, a.Height, a.FileSize, a.Logo, a.Thumb), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "attachment_upload",
+		Desc: "通过远程URL上传附件（图片）到站点。AI无法直接上传本地文件，只能从网络URL下载。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"url":       {Type: schema.String, Desc: "图片的远程URL地址", Required: true},
+			"file_name": {Type: schema.String, Desc: "保存的文件名（不含扩展名），可选"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			URL      string `json:"url"`
+			FileName string `json:"file_name"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.URL == "" {
+			return "错误：URL不能为空", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		attachment, err := w.DownloadRemoteImage(args.URL, args.FileName, 0)
+		if err != nil {
+			return "", fmt.Errorf("上传附件失败: %w", err)
+		}
+		attachment.GetThumb(w.PluginStorage.StorageUrl)
+		return fmt.Sprintf("附件上传成功！ID: %d\n文件名: %s\nURL: %s", attachment.Id, attachment.FileName, attachment.Logo), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "attachment_delete",
+		Desc: "删除附件。注意：此操作会同时删除物理文件，不可恢复。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "要删除的附件ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args ArgId
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		attach, err := w.GetAttachmentById(uint(args.Id))
+		if err != nil {
+			return "", fmt.Errorf("获取附件失败: %w", err)
+		}
+		err = w.DeleteAttachment(attach)
+		if err != nil {
+			return "", fmt.Errorf("删除附件失败: %w", err)
+		}
+		return fmt.Sprintf("附件 [%d] %s 已成功删除", attach.Id, attach.FileName), nil
+	})
+
 	// ---- Skill tools (progressive disclosure) ----
 	add(skillListTool())
 	add(skillGetTool())
