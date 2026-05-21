@@ -2629,6 +2629,7 @@ SEO信息：
 	add(skillListTool())
 	add(skillGetTool())
 	add(skillReloadTool())
+	add(skillSaveTool())
 
 	return tools, handlers
 }

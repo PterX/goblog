@@ -43,6 +43,7 @@ type Skill struct {
 type SkillBackend interface {
 	List(ctx context.Context) ([]SkillFrontMatter, error)
 	Get(ctx context.Context, name string) (*Skill, error)
+	Save(ctx context.Context, skill *Skill) error
 	Reload(ctx context.Context) error
 }
 
@@ -94,6 +95,79 @@ func (b *FilesystemSkillBackend) Get(_ context.Context, name string) (*Skill, er
 	}
 	clone := *s
 	return &clone, nil
+}
+
+func (b *FilesystemSkillBackend) Save(_ context.Context, skill *Skill) error {
+	if skill == nil {
+		return fmt.Errorf("skill is nil")
+	}
+	if skill.Name == "" {
+		return fmt.Errorf("skill name is required")
+	}
+
+	// Build YAML frontmatter
+	var buf strings.Builder
+	buf.WriteString("---\n")
+	if skill.Description != "" {
+		buf.WriteString(fmt.Sprintf("description: %s\n", skill.Description))
+	}
+	if skill.Category != "" {
+		buf.WriteString(fmt.Sprintf("category: %s\n", skill.Category))
+	}
+	if skill.Version != "" {
+		buf.WriteString(fmt.Sprintf("version: %s\n", skill.Version))
+	}
+	if skill.Author != "" {
+		buf.WriteString(fmt.Sprintf("author: %s\n", skill.Author))
+	}
+	if len(skill.Tags) > 0 {
+		buf.WriteString("tags:\n")
+		for _, tag := range skill.Tags {
+			buf.WriteString(fmt.Sprintf("  - %s\n", tag))
+		}
+	}
+	buf.WriteString("---\n\n")
+	// Write body
+	buf.WriteString(skill.Content)
+	// Ensure trailing newline
+	content := buf.String()
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Build directory: data/skills/<name>/
+	skillDir := filepath.Join(b.dir, skill.Name)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return fmt.Errorf("create skill dir: %w", err)
+	}
+
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("write skill file: %w", err)
+	}
+
+	// Reload the skill into cache
+	raw, err := os.ReadFile(skillPath)
+	if err != nil {
+		return fmt.Errorf("re-read skill file: %w", err)
+	}
+	fm, body := parseSkillFrontmatter(string(raw))
+	if fm.Description == "" {
+		fm.Description = firstParagraph(body)
+	}
+	info, _ := os.Stat(skillPath)
+	skill = &Skill{
+		SkillFrontMatter: fm,
+		Content:          body,
+		BaseDirectory:    skillDir,
+		UpdatedAt:        info.ModTime(),
+		SourcePath:       skillPath,
+	}
+	b.skills[skill.Name] = skill
+	return nil
 }
 
 func (b *FilesystemSkillBackend) Reload(_ context.Context) error {
@@ -366,6 +440,88 @@ func skillReloadTool() (*schema.ToolInfo, toolHandler) {
 		}
 		list, _ := backend.List(ctx)
 		return fmt.Sprintf("技能已重新加载，当前有 %d 个可用技能。", len(list)), nil
+	}
+}
+
+// skillSaveTool returns the tool info and handler for creating or updating a skill.
+func skillSaveTool() (*schema.ToolInfo, toolHandler) {
+	return &schema.ToolInfo{
+		Name: "skill_save",
+		Desc: "创建或更新技能(SKILL)。技能是存储在 data/skills/ 下的结构化知识文档，包含 frontmatter 元数据和 Markdown 正文。如果同名技能已存在则更新，不存在则创建。创建后自动生效。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"name": {
+				Type: schema.String,
+				Desc: "技能名称（必填）。命名建议：使用英文小写+连字符，如 seo-article-optimization。会作为目录名使用。",
+			},
+			"description": {
+				Type: schema.String,
+				Desc: "技能简介（推荐填），简要说明该技能的用途和适用场景。",
+			},
+			"category": {
+				Type: schema.String,
+				Desc: "技能分类（可选），如 SEO、内容、模板、运营等。",
+			},
+			"version": {
+				Type: schema.String,
+				Desc: "版本号（可选），如 1.0.0。",
+			},
+			"author": {
+				Type: schema.String,
+				Desc: "作者（可选）。",
+			},
+			"tags": {
+				Type: schema.String,
+				Desc: "标签（可选），逗号分隔的列表，如 seo,article,optimization。",
+			},
+			"content": {
+				Type: schema.String,
+				Desc: "Markdown 正文内容（必填），即技能的具体步骤、说明和指导。",
+			},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Category    string `json:"category"`
+			Version     string `json:"version"`
+			Author      string `json:"author"`
+			Tags        string `json:"tags"`
+			Content     string `json:"content"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Name == "" {
+			return "", fmt.Errorf("参数 name 为必填")
+		}
+		if args.Content == "" {
+			return "", fmt.Errorf("参数 content 为必填")
+		}
+
+		skill := &Skill{
+			SkillFrontMatter: SkillFrontMatter{
+				Name:        args.Name,
+				Description: args.Description,
+				Category:    args.Category,
+				Version:     args.Version,
+				Author:      args.Author,
+			},
+			Content: args.Content,
+		}
+		if args.Tags != "" {
+			for _, t := range strings.Split(args.Tags, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					skill.Tags = append(skill.Tags, t)
+				}
+			}
+		}
+
+		backend := GetSkillBackend()
+		if err := backend.Save(ctx, skill); err != nil {
+			return "", fmt.Errorf("保存技能失败: %w", err)
+		}
+		return fmt.Sprintf("技能 %q 已保存，路径: data/skills/%s/SKILL.md", args.Name, args.Name), nil
 	}
 }
 
