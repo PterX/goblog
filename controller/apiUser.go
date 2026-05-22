@@ -241,6 +241,8 @@ func ApiLogin(ctx iris.Context) {
 	})
 }
 
+// ApiSendVerifyEmail 发送验证邮件, state := verify = 邮件验证|reset = 重置密码|exist = 检查邮箱已存在|login = 登录
+// 允许快速登录
 func ApiSendVerifyEmail(ctx iris.Context) {
 	currentSite := provider.CurrentSite(ctx)
 	var req request.ApiRegisterRequest
@@ -292,7 +294,8 @@ func ApiSendVerifyEmail(ctx iris.Context) {
 	})
 }
 
-// ApiVerifyEmail 验证邮箱, state := verify = 邮件验证|reset = 重置密码|exist = 检查邮箱已存在
+// ApiVerifyEmail 验证邮箱, state := verify = 邮件验证|reset = 重置密码|exist = 检查邮箱已存在|login = 登录
+// 允许快速登录
 func ApiVerifyEmail(ctx iris.Context) {
 	currentSite := provider.CurrentSite(ctx)
 	token := ctx.URLParam("token")
