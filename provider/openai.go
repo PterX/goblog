@@ -191,7 +191,11 @@ func (w *Website) SelfAiPseudoResult(req *AnqiAiRequest) (*AnqiAiRequest, error)
 
 	req.Content = strings.Join(results, "\n")
 	if w.Content.Editor != "markdown" {
-		req.Content = library.MarkdownToHTML(req.Content, w.System.BaseUrl, w.Content.FilterOutlink)
+		frontUrl := w.System.BaseUrl
+		if w.System.FrontUrl != "" {
+			frontUrl = w.System.FrontUrl
+		}
+		req.Content = library.MarkdownToHTML(req.Content, frontUrl, w.Content.FilterOutlink)
 	}
 
 	return req, nil
@@ -399,7 +403,11 @@ func (w *Website) SelfAiGenerateResult(req *AnqiAiRequest) (*AnqiAiRequest, erro
 	req.Title = title
 	req.Content = strings.Join(results, "\n")
 	if w.Content.Editor != "markdown" {
-		req.Content = library.MarkdownToHTML(req.Content, w.System.BaseUrl, w.Content.FilterOutlink)
+		frontUrl := w.System.BaseUrl
+		if w.System.FrontUrl != "" {
+			frontUrl = w.System.FrontUrl
+		}
+		req.Content = library.MarkdownToHTML(req.Content, frontUrl, w.Content.FilterOutlink)
 	}
 
 	return req, nil

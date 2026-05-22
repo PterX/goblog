@@ -503,7 +503,11 @@ func ApiImportMakeSitemap(ctx iris.Context) {
 				//由于sitemap的更新可能很频繁，因此sitemap的更新时间直接写入一个文件中
 				pluginSitemap.UpdatedTime = currentSite.GetSitemapTime()
 				// 写入Sitemap的url
-				pluginSitemap.SitemapURL = currentSite.System.BaseUrl + "/sitemap." + pluginSitemap.Type
+				frontUrl := currentSite.System.BaseUrl
+				if currentSite.System.FrontUrl != "" {
+					frontUrl = currentSite.System.FrontUrl
+				}
+				pluginSitemap.SitemapURL = frontUrl + "/sitemap." + pluginSitemap.Type
 
 				currentSite.AddAdminLog(ctx, ctx.Tr("UpdateSitemapManually"))
 			}
@@ -530,7 +534,11 @@ func ApiImportMakeSitemap(ctx iris.Context) {
 	//由于sitemap的更新可能很频繁，因此sitemap的更新时间直接写入一个文件中
 	pluginSitemap.UpdatedTime = currentSite.GetSitemapTime()
 	// 写入Sitemap的url
-	pluginSitemap.SitemapURL = currentSite.System.BaseUrl + "/sitemap." + pluginSitemap.Type
+	frontUrl := currentSite.System.BaseUrl
+	if currentSite.System.FrontUrl != "" {
+		frontUrl = currentSite.System.FrontUrl
+	}
+	pluginSitemap.SitemapURL = frontUrl + "/sitemap." + pluginSitemap.Type
 
 	currentSite.AddAdminLog(ctx, ctx.Tr("UpdateSitemapManually"))
 

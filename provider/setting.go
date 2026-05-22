@@ -430,6 +430,9 @@ func (w *Website) LoadUserSetting(value string) {
 	if w.PluginUser.DefaultGroupId == 0 {
 		w.PluginUser.DefaultGroupId = 1
 	}
+	if w.PluginUser.DefaultStatus == "" {
+		w.PluginUser.DefaultStatus = "normal"
+	}
 }
 
 func (w *Website) LoadOrderSetting(value string) {
@@ -998,7 +1001,11 @@ func (w *Website) GetGoogleAuthSetting() *config.PluginGoogleAuthConfig {
 	if value != "" {
 		_ = json.Unmarshal([]byte(value), &cfg)
 	}
-	cfg.RedirectUrl = w.System.BaseUrl + "/login/google"
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
+	cfg.RedirectUrl = frontUrl + "/login/google"
 
 	return &cfg
 }

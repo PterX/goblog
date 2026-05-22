@@ -25,7 +25,9 @@ type Order struct {
 	EndTime           int64  `json:"end_time" gorm:"column:end_time;type:int(10) not null;default:0;comment:在确认支付之前，为订单关闭时间，在支付完成后，为自动确认收货时间"`
 	DeliverTime       int64  `json:"deliver_time" gorm:"column:deliver_time;type:int(10) not null;default:0;comment:发货时间"`
 	FinishedTime      int64  `json:"finished_time" gorm:"column:finished_time;type:int(10) not null;default:0;comment:订单完成时间"`
-	DiscountAmount    int64  `json:"discount_amount" gorm:"column:discount_amount;type:bigint(20) not null;default:0;comment:优惠金额"` // 可能一个订单支持多个优惠
+	DiscountAmount    int64  `json:"discount_amount" gorm:"column:discount_amount;type:bigint(20) not null;default:0;comment:优惠金额"` // 可能一个订单支持多个优惠，优惠汇总
+	UserDiscount      int64  `json:"user_discount" gorm:"column:user_discount;type:bigint(20) not null;default:0;comment:用户优惠金额"`   // 用户优惠金额,可能是用户组，也可能是分享优惠
+	CouponDiscount    int64  `json:"coupon_discount" gorm:"column:coupon_discount;type:bigint(20) not null;default:0;comment:优惠券优惠金额"`
 	CouponCodeId      string `json:"coupon_code_id" gorm:"column:coupon_code_id;type:varchar(36) not null;default:''"`
 	SellerId          uint   `json:"seller_id" gorm:"column:seller_id;type:int(10) unsigned not null;default:0;index"` // 卖家
 	SellerAmount      int64  `json:"seller_amount" gorm:"column:seller_amount;type:bigint(20) not null;default:0;comment:卖家可得金额"`
@@ -75,22 +77,24 @@ type OrderDetail struct {
 }
 
 type OrderAddress struct {
-	Id          uint   `json:"id" gorm:"column:id;type:int(10) unsigned not null AUTO_INCREMENT;primaryKey"`
-	CreatedTime int64  `json:"created_time" gorm:"column:created_time;type:int(11);autoCreateTime;index:idx_created_time"`
-	UpdatedTime int64  `json:"updated_time" gorm:"column:updated_time;type:int(11);autoUpdateTime;index:idx_updated_time"`
-	UserId      uint   `json:"user_id" gorm:"column:user_id;type:int(10) unsigned not null;default:0;index"`
-	Name        string `json:"name" gorm:"column:name;type:varchar(64) not null;default:''"`
-	LastName    string `json:"last_name" gorm:"column:last_name;type:varchar(64) not null;default:''"`
-	Phone       string `json:"phone" gorm:"column:phone;type:varchar(20) not null;default:'';index"`
-	Email       string `json:"email" gorm:"column:email;type:varchar(100) not null;default:''"`
-	Province    string `json:"province" gorm:"column:province;type:varchar(100) not null;default:''"`
-	City        string `json:"city" gorm:"column:city;type:varchar(100) not null;default:''"`
-	Town        string `json:"town" gorm:"column:town;type:varchar(100) not null;default:''"`
-	Country     string `json:"country" gorm:"column:country;type:varchar(100) not null;default:''"`
-	AddressInfo string `json:"address_info" gorm:"column:address_info;type:varchar(255) not null;default:''"`
-	Company     string `json:"company" gorm:"column:company;type:varchar(250) not null;default:''"`
-	Postcode    string `json:"postcode" gorm:"column:postcode;type:varchar(36) not null;default:''"`
-	Status      int    `json:"status" gorm:"column:status;type:tinyint(1) not null;default:0"`
+	Id           uint   `json:"id" gorm:"column:id;type:int(10) unsigned not null AUTO_INCREMENT;primaryKey"`
+	CreatedTime  int64  `json:"created_time" gorm:"column:created_time;type:int(11);autoCreateTime;index:idx_created_time"`
+	UpdatedTime  int64  `json:"updated_time" gorm:"column:updated_time;type:int(11);autoUpdateTime;index:idx_updated_time"`
+	UserId       uint   `json:"user_id" gorm:"column:user_id;type:int(10) unsigned not null;default:0;index"`
+	Name         string `json:"name" gorm:"column:name;type:varchar(64) not null;default:''"`
+	LastName     string `json:"last_name" gorm:"column:last_name;type:varchar(64) not null;default:''"`
+	Phone        string `json:"phone" gorm:"column:phone;type:varchar(20) not null;default:'';index"`
+	Email        string `json:"email" gorm:"column:email;type:varchar(100) not null;default:''"`
+	Province     string `json:"province" gorm:"column:province;type:varchar(100) not null;default:''"`
+	ProvinceCode string `json:"province_code" gorm:"column:province_code;type:varchar(100) not null;default:''"`
+	City         string `json:"city" gorm:"column:city;type:varchar(100) not null;default:''"`
+	Town         string `json:"town" gorm:"column:town;type:varchar(100) not null;default:''"`
+	Country      string `json:"country" gorm:"column:country;type:varchar(100) not null;default:''"`
+	CountryCode  string `json:"country_code" gorm:"column:country_code;type:varchar(100) not null;default:''"`
+	AddressInfo  string `json:"address_info" gorm:"column:address_info;type:varchar(255) not null;default:''"`
+	Company      string `json:"company" gorm:"column:company;type:varchar(250) not null;default:''"`
+	Postcode     string `json:"postcode" gorm:"column:postcode;type:varchar(36) not null;default:''"`
+	Status       int    `json:"status" gorm:"column:status;type:tinyint(1) not null;default:0"`
 }
 
 // OrderRefund 退款记录

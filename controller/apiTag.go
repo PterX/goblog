@@ -651,7 +651,11 @@ func ApiPageDetail(ctx iris.Context) {
 	category.Thumb = category.GetThumb(currentSite.PluginStorage.StorageUrl, currentSite.GetDefaultThumb(int(category.Id)))
 	// convert markdown to html
 	if render {
-		category.Content = library.MarkdownToHTML(category.Content, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+		frontUrl := currentSite.System.BaseUrl
+		if currentSite.System.FrontUrl != "" {
+			frontUrl = currentSite.System.FrontUrl
+		}
+		category.Content = library.MarkdownToHTML(category.Content, frontUrl, currentSite.Content.FilterOutlink)
 	}
 	ctx.JSON(iris.Map{
 		"code": config.StatusOK,
@@ -726,7 +730,10 @@ func ApiTagDetail(ctx iris.Context) {
 		})
 		return
 	}
-
+	frontUrl := currentSite.System.BaseUrl
+	if currentSite.System.FrontUrl != "" {
+		frontUrl = currentSite.System.FrontUrl
+	}
 	if tagDetail != nil {
 		tagDetail.Link = currentSite.GetUrl("tag", tagDetail, 0)
 		tagDetail.GetThumb(currentSite.PluginStorage.StorageUrl, currentSite.GetDefaultThumb(int(tagDetail.Id)))
@@ -735,7 +742,7 @@ func ApiTagDetail(ctx iris.Context) {
 			tagDetail.Content = tagContent.Content
 			// convert markdown to html
 			if render {
-				tagDetail.Content = library.MarkdownToHTML(tagDetail.Content, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+				tagDetail.Content = library.MarkdownToHTML(tagDetail.Content, frontUrl, currentSite.Content.FilterOutlink)
 			}
 			tagDetail.Extra = tagContent.Extra
 			if tagDetail.Extra != nil {
@@ -754,7 +761,7 @@ func ApiTagDetail(ctx iris.Context) {
 							value, ok2 := tagDetail.Extra[field.FieldName].(string)
 							if ok2 {
 								if field.Type == config.CustomFieldTypeEditor && render {
-									value = library.MarkdownToHTML(value, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+									value = library.MarkdownToHTML(value, frontUrl, currentSite.Content.FilterOutlink)
 								}
 								tagDetail.Extra[field.FieldName] = currentSite.ReplaceContentUrl(value, true)
 							}

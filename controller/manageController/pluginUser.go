@@ -17,9 +17,7 @@ func PluginUserFieldsSetting(ctx iris.Context) {
 	ctx.JSON(iris.Map{
 		"code": config.StatusOK,
 		"msg":  "",
-		"data": iris.Map{
-			"fields": currentSite.GetUserFields(),
-		},
+		"data": currentSite.PluginUser,
 	})
 }
 
@@ -58,6 +56,8 @@ func PluginUserFieldsSettingForm(ctx iris.Context) {
 		}
 	}
 
+	currentSite.PluginUser.DefaultGroupId = req.DefaultGroupId
+	currentSite.PluginUser.DefaultStatus = req.DefaultStatus
 	currentSite.PluginUser.Fields = fields
 
 	err := currentSite.SaveSettingValue(provider.UserSettingKey, currentSite.PluginUser)

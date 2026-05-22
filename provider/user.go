@@ -419,13 +419,85 @@ func (w *Website) RegisterUser(req *request.ApiRegisterRequest) (*model.User, er
 		RealName:  req.RealName,
 		AvatarURL: req.AvatarURL,
 		ParentId:  req.InviteId,
+		FirstName: req.FirstName,
+		LastName:  req.LastName,
+		Birthday:  req.Birthday,
+		Introduce: req.Introduce,
 		Phone:     req.Phone,
 		Email:     req.Email,
 		GroupId:   w.PluginUser.DefaultGroupId,
-		Status:    1,
+		Status:    w.PluginUser.GetDefaultStatus(),
 	}
+	user.AvatarURL = strings.TrimPrefix(user.AvatarURL, w.PluginStorage.StorageUrl)
+	req.Password = strings.TrimSpace(req.Password)
 	user.EncryptPassword(req.Password)
 	w.DB.Save(&user)
+
+	//extra
+	extraFields := map[string]interface{}{}
+	if len(w.PluginUser.Fields) > 0 {
+		for _, v := range w.PluginUser.Fields {
+			if req.Extra[v.FieldName] != nil {
+				extraValue, ok := req.Extra[v.FieldName]
+				if ok {
+					if v.Type == config.CustomFieldTypeCheckbox {
+						//只有这个类型的数据是数组,数组转成,分隔字符串
+						if val, ok := extraValue.([]interface{}); ok {
+							var val2 []string
+							for _, v2 := range val {
+								v2s, _ := v2.(string)
+								val2 = append(val2, v2s)
+							}
+							extraFields[v.FieldName] = strings.Join(val2, ",")
+						}
+					} else if v.Type == config.CustomFieldTypeNumber || v.Type == config.CustomFieldTypeCategory {
+						//只有这个类型的数据是数字，转成数字
+						extraFields[v.FieldName], _ = strconv.ParseInt(fmt.Sprint(extraValue), 10, 64)
+					} else if v.Type == config.CustomFieldTypeImages || v.Type == config.CustomFieldTypeTexts || v.Type == config.CustomFieldTypeArchive {
+						// 存 json
+						if val, ok := extraValue.([]interface{}); ok {
+							for j, v2 := range val {
+								v2s, ok2 := v2.(string)
+								if ok2 {
+									val[j] = w.ReplaceContentUrl(v2s, false)
+								}
+							}
+							buf, _ := json.Marshal(val)
+							extraFields[v.FieldName] = string(buf)
+						}
+					} else if v.Type == config.CustomFieldTypeTimeline {
+						// 存 json
+						buf, _ := json.Marshal(extraValue)
+						extraFields[v.FieldName] = string(buf)
+					} else {
+						value, ok := extraValue.(string)
+						if ok {
+							if v.Type == config.CustomFieldTypeImage || v.Type == config.CustomFieldTypeFile || v.Type == config.CustomFieldTypeEditor {
+								extraFields[v.FieldName] = w.ReplaceContentUrl(value, false)
+							} else {
+								extraFields[v.FieldName] = extraValue
+							}
+						} else {
+							extraFields[v.FieldName] = extraValue
+						}
+					}
+				}
+			} else {
+				if v.Type == config.CustomFieldTypeNumber || v.Type == config.CustomFieldTypeCategory {
+					//只有这个类型的数据是数字，转成数字
+					extraFields[v.FieldName] = 0
+				} else {
+					extraFields[v.FieldName] = ""
+				}
+			}
+		}
+	}
+
+	//extra
+	if len(extraFields) > 0 {
+		//入库
+		w.DB.Model(model.User{}).Where("`id` = ?", user.Id).Updates(extraFields)
+	}
 
 	if w.PluginSendmail.SignupVerify {
 		_ = w.SendVerifyEmail(&user, "verify")
@@ -473,7 +545,7 @@ func (w *Website) LoginViaWeapp(req *request.ApiLoginRequest) (*model.User, erro
 			ParentId:      req.InviteId,
 			GroupId:       w.PluginUser.DefaultGroupId,
 			ResetPassword: true,
-			Status:        1,
+			Status:        w.PluginUser.GetDefaultStatus(),
 		}
 
 		err = w.DB.Save(user).Error
@@ -547,7 +619,7 @@ func (w *Website) LoginViaWechat(req *request.ApiLoginRequest) (*model.User, err
 			GroupId:       w.PluginUser.DefaultGroupId,
 			Password:      "",
 			ResetPassword: true,
-			Status:        1,
+			Status:        w.PluginUser.GetDefaultStatus(),
 		}
 		w.DB.Save(user)
 		userWechat.UserId = user.Id
@@ -597,7 +669,7 @@ func (w *Website) LoginViaGoogle(req *request.ApiLoginRequest) (*model.User, err
 			GroupId:       w.PluginUser.DefaultGroupId,
 			Password:      "",
 			ResetPassword: true,
-			Status:        1,
+			Status:        w.PluginUser.GetDefaultStatus(),
 		}
 		if userInfo.GivenName != "" {
 			user.RealName = userInfo.GivenName + " " + userInfo.FamilyName
@@ -718,22 +790,24 @@ func (w *Website) UpdateUserInfo(userId uint, req *request.UserRequest) error {
 		return err
 	}
 
-	exist, err := w.GetUserInfoByUserName(req.UserName)
-	if err == nil && exist.Id != user.Id {
-		return errors.New(w.Tr("TheUsernameHasBeenRegistered"))
+	if req.UserName != "" {
+		exist, err := w.GetUserInfoByUserName(req.UserName)
+		if err == nil && exist.Id != user.Id {
+			return errors.New(w.Tr("TheUsernameHasBeenRegistered"))
+		}
 	}
 
-	if user.Phone != "" {
-		req.Phone = ""
-	}
-	if user.Email != "" {
-		req.Email = ""
-	}
+	// if user.Phone != "" {
+	// 	req.Phone = ""
+	// }
+	// if user.Email != "" {
+	// 	req.Email = ""
+	// }
 	if req.Phone != "" {
 		// if !w.VerifyCellphoneFormat(req.Phone) {
 		// 	return errors.New(w.Tr("IncorrectMobilePhoneNumber"))
 		// }
-		exist, err = w.GetUserInfoByPhone(req.Phone)
+		exist, err := w.GetUserInfoByPhone(req.Phone)
 		if err == nil && exist.Id != user.Id {
 			return errors.New(w.Tr("TheMobilePhoneNumberHasBeenRegistered"))
 		}
@@ -743,20 +817,30 @@ func (w *Website) UpdateUserInfo(userId uint, req *request.UserRequest) error {
 		if !w.VerifyEmailFormat(req.Email) {
 			return errors.New(w.Tr("IncorrectEmail"))
 		}
-		exist, err = w.GetUserInfoByEmail(req.Email)
+		exist, err := w.GetUserInfoByEmail(req.Email)
 		if err == nil && exist.Id != user.Id {
 			return errors.New(w.Tr("TheEmailHasBeenRegistered"))
 		}
 		user.Email = req.Email
 	}
-	user.UserName = req.UserName
-	user.RealName = req.RealName
-	user.FirstName = req.FirstName
-	user.LastName = req.LastName
+	if req.UserName != "" {
+		user.UserName = req.UserName
+	}
+	if req.RealName != "" {
+		user.RealName = req.RealName
+	}
 	if req.FirstName != "" {
+		user.FirstName = req.FirstName
+	}
+	if req.LastName != "" {
+		user.LastName = req.LastName
+	}
+	if req.FirstName != "" && req.LastName != "" && user.RealName == "" {
 		user.RealName = req.FirstName + " " + req.LastName
 	}
-	user.Introduce = req.Introduce
+	if req.Introduce != "" {
+		user.Introduce = req.Introduce
+	}
 	if user.GroupId == 0 {
 		user.GroupId = w.PluginUser.DefaultGroupId
 	}
@@ -778,25 +862,35 @@ func (w *Website) CleanUserVip() {
 	w.DB.Model(&model.User{}).Where("`status` = 1 and `group_id` != ? and `expire_time` < ?", group.Id, time.Now().Unix()).UpdateColumn("group_id", group.Id)
 }
 
-func (w *Website) GetUserDiscount(userId uint, user *model.User) int64 {
+// GetUserDiscount 获取用户优惠比例， 优先级：用户组优惠比例 > 通过分享链接下单优惠比例
+func (w *Website) GetUserDiscount(userId uint, user *model.User) (discount, shippingDiscount int64) {
 	if user == nil && userId > 0 {
 		user, _ = w.GetUserInfoById(userId)
 	}
 	if user != nil {
+		group, err := w.GetUserGroupInfo(user.GroupId)
+		if err == nil {
+			if group.Setting.Discount > 0 {
+				discount = group.Setting.Discount
+			}
+			if group.Setting.ShippingDiscount > 0 {
+				shippingDiscount = group.Setting.ShippingDiscount
+			}
+		}
 		if user.ParentId > 0 {
 			parent, err := w.GetUserInfoById(user.ParentId)
 			if err == nil {
 				group, err := w.GetUserGroupInfo(parent.GroupId)
 				if err == nil {
-					if group.Setting.Discount > 0 {
-						return group.Setting.Discount
+					if group.Setting.ShareDiscount > 0 && group.Setting.ShareDiscount > discount {
+						discount = group.Setting.ShareDiscount
 					}
 				}
 			}
 		}
 	}
 
-	return 0
+	return discount, shippingDiscount
 }
 
 func (w *Website) GetUserFields() []*config.CustomField {
@@ -840,7 +934,8 @@ func (w *Website) DeleteUserField(fieldName string) error {
 
 func (w *Website) GetUserExtra(id uint) map[string]*config.CustomField {
 	//读取extra
-	result := model.ExtraData{}
+	result := map[string]interface{}{}
+	// 从数据库中取出来
 	extraFields := map[string]*config.CustomField{}
 	var fields []string
 	for _, v := range w.PluginUser.Fields {

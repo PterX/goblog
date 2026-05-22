@@ -15,6 +15,7 @@ type SystemConfig struct {
 	SiteIcp       string        `json:"site_icp"`
 	SiteCopyright string        `json:"site_copyright"`
 	BaseUrl       string        `json:"base_url"`
+	FrontUrl      string        `json:"front_url"`
 	MobileUrl     string        `json:"mobile_url"`
 	AdminUrl      string        `json:"admin_url"`
 	SiteClose     int           `json:"site_close"`

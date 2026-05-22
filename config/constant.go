@@ -200,3 +200,9 @@ const (
 	MultiLangSiteTypeMulti  = "multi"
 	MultiLangSiteTypeSingle = "single"
 )
+
+const (
+	UserStatusActive  = 1  // 已激活
+	UserStatusPending = 0  // 待审核
+	UserStatusBlocked = -1 // 已封禁
+)

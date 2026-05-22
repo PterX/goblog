@@ -577,7 +577,10 @@ func createPaypalPayment(ctx iris.Context, payment *model.Payment, order *model.
 			},
 		},
 	}
-
+	frontUrl := currentSite.System.BaseUrl
+	if currentSite.System.FrontUrl != "" {
+		frontUrl = currentSite.System.FrontUrl
+	}
 	bm := make(gopay.BodyMap)
 	bm.Set("intent", "CAPTURE").
 		Set("purchase_units", purchases).
@@ -588,8 +591,8 @@ func createPaypalPayment(ctx iris.Context, payment *model.Payment, order *model.
 						Set("locale", "en-US").
 						Set("shipping_preference", "NO_SHIPPING").
 						Set("user_action", "PAY_NOW").
-						Set("return_url", currentSite.System.BaseUrl+"/return/paypal/pay").
-						Set("cancel_url", currentSite.System.BaseUrl+"/return/paypal/cancel")
+						Set("return_url", frontUrl+"/return/paypal/pay").
+						Set("cancel_url", frontUrl+"/return/paypal/cancel")
 				})
 			})
 		})
@@ -737,7 +740,7 @@ func ApiPaymentCheck(ctx iris.Context) {
 		return
 	}
 
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 6; i++ {
 		order, _ = currentSite.GetOrderInfoByOrderId(orderId)
 		if order.Status != config.OrderStatusWaiting {
 			//支付成功
@@ -748,6 +751,18 @@ func ApiPaymentCheck(ctx iris.Context) {
 			return
 		}
 		time.Sleep(1 * time.Second)
+	}
+	// 5秒内未支付成功，并且订单已经下单1分钟以上，则尝试查询一次接口检查支付情况
+	if time.Now().Unix()-payment.CreatedTime > 60 {
+		_ = currentSite.TraceQuery(payment)
+		if payment.PaidTime > 0 {
+			//支付成功
+			ctx.JSON(iris.Map{
+				"code": config.StatusOK,
+				"msg":  currentSite.TplTr("PaymentSuccessful"),
+			})
+			return
+		}
 	}
 
 	ctx.JSON(iris.Map{
@@ -811,7 +826,11 @@ func ApiCheckArchivePassword(ctx iris.Context) {
 			content = archiveData.Content
 			// render
 			if currentSite.Content.Editor == "markdown" {
-				content = library.MarkdownToHTML(archiveData.Content, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+				frontUrl := currentSite.System.BaseUrl
+				if currentSite.System.FrontUrl != "" {
+					frontUrl = currentSite.System.FrontUrl
+				}
+				content = library.MarkdownToHTML(archiveData.Content, frontUrl, currentSite.Content.FilterOutlink)
 			}
 		}
 		detail := library.StructToMap(archiveDetail)

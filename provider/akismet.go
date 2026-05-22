@@ -58,8 +58,11 @@ func (w *Website) InitAkismet() {
 		APIKey:    setting.ApiKey,
 		CheckType: setting.CheckType,
 	}
-
-	if err := c.VerifyKey(context.Background(), w.System.BaseUrl); err != nil {
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
+	if err := c.VerifyKey(context.Background(), frontUrl); err != nil {
 		log.Printf("Akismet api key verify error: %v", err)
 		w.AkismetClient = nil
 		return
@@ -133,8 +136,12 @@ func (w *Website) AkismentCheck(ctx iris.Context, checkType int, data interface{
 	if !ok {
 		return 1, false
 	}
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
 	var akiComment = &AkismentComment{
-		Blog:                w.System.BaseUrl,
+		Blog:                frontUrl,
 		UserIP:              ctx.RemoteAddr(),
 		UserAgent:           ctx.GetHeader("User-Agent"),
 		Referrer:            ctx.Request().Referer(),

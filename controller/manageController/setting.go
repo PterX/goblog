@@ -79,6 +79,9 @@ func SettingSystemForm(ctx iris.Context) {
 		}
 	}
 	req.BaseUrl = strings.TrimRight(req.BaseUrl, "/")
+	if req.FrontUrl != "" {
+		req.FrontUrl = strings.TrimRight(req.FrontUrl, "/")
+	}
 	currentSite.System.SiteName = req.SiteName
 	currentSite.System.SiteLogo = req.SiteLogo
 	currentSite.System.SiteIcp = req.SiteIcp
@@ -93,6 +96,7 @@ func SettingSystemForm(ctx iris.Context) {
 		currentSite.SaveSettingValue(provider.StorageSettingKey, currentSite.PluginStorage)
 	}
 	currentSite.System.BaseUrl = req.BaseUrl
+	currentSite.System.FrontUrl = req.FrontUrl
 	currentSite.System.MobileUrl = req.MobileUrl
 	currentSite.System.Language = req.Language
 	currentSite.System.ExtraFields = req.ExtraFields

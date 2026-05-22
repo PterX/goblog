@@ -21,16 +21,23 @@ var (
 func (w *Website) GetUrl(match string, data interface{}, page int, args ...interface{}) string {
 	mainSite := w.GetMainWebsite()
 	baseUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		baseUrl = w.System.FrontUrl
+	}
 	if mainSite.MultiLanguage.Open {
+		mainSiteBaseUrl := mainSite.System.BaseUrl
+		if mainSite.System.FrontUrl != "" {
+			mainSiteBaseUrl = mainSite.System.FrontUrl
+		}
 		if mainSite.MultiLanguage.Type == config.MultiLangTypeDirectory {
 			// 替换目录
 			if mainSite.Id == w.Id && mainSite.MultiLanguage.ShowMainDir == false {
 				// 无需处理
 			} else {
-				baseUrl = mainSite.System.BaseUrl + "/" + w.System.Language
+				baseUrl = mainSiteBaseUrl + "/" + w.System.Language
 			}
 		} else if mainSite.MultiLanguage.Type == config.MultiLangTypeSame {
-			baseUrl = mainSite.System.BaseUrl
+			baseUrl = mainSiteBaseUrl
 		}
 	}
 	rewritePattern := mainSite.ParsePattern(false)
