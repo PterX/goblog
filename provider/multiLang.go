@@ -166,9 +166,9 @@ func (w *Website) GetMultiLangSites(mainId uint, all bool) []config.MultiLangSit
 			if mainSite.MultiLanguage.Type == config.MultiLangTypeDomain {
 				link = subSite.BaseUrl + "/"
 			} else if mainSite.MultiLanguage.Type == config.MultiLangTypeDirectory {
-				frontUrl := w.System.BaseUrl
-				if w.System.FrontUrl != "" {
-					frontUrl = w.System.FrontUrl
+				frontUrl := mainSite.System.BaseUrl
+				if mainSite.System.FrontUrl != "" {
+					frontUrl = mainSite.System.FrontUrl
 				}
 				link = frontUrl + "/" + subSite.Language + "/"
 			} else if mainSite.MultiLanguage.Type == config.MultiLangTypeSame {

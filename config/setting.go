@@ -97,6 +97,7 @@ type BannerItem struct {
 	Id          int    `json:"id"`
 	Link        string `json:"link"`
 	Alt         string `json:"alt"`
+	Title       string `json:"title"` // 兼容Alt
 	Description string `json:"description"`
 	Type        string `json:"type"` // 增加类型
 }
