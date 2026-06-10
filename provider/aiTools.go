@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"time"
@@ -113,7 +112,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			if args.Keyword != "" {
 				var ids []int64
 				// 如果开启了全文索引，则尝试使用全文索引搜索，status = "ok" 时有效
-				if args.Status == "ok" {
+				if isDraft == 0 {
 					var tmpDocs []fulltext.TinyArchive
 					var err2 error
 					tmpDocs, fulltextTotal, err2 = svc.site.Search(args.Keyword, args.ModuleID, args.Page, args.PageSize)
@@ -204,10 +203,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		b.WriteString(fmt.Sprintf("关键词: %s\n", archive.Keywords))
 		b.WriteString(fmt.Sprintf("描述: %s\n", archive.Description))
 		b.WriteString(fmt.Sprintf("创建时间: %s\n", time.Unix(archive.CreatedTime, 0).Format("2006-01-02 15:04:05")))
-		if len(content) > 500 {
-			content = content[:500] + "..."
-		}
-		b.WriteString(fmt.Sprintf("内容预览: %s\n", content))
+		b.WriteString(fmt.Sprintf("内容: %s\n", content))
 		return b.String(), nil
 	})
 
@@ -215,14 +211,15 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		Name: "archive_create",
 		Desc: "创建新文档。必填字段：title（标题）、content（内容）、category_id（分类ID）。创建成功返回文档ID。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"title":       {Type: schema.String, Desc: "文档标题", Required: true},
-			"content":     {Type: schema.String, Desc: "文档内容，支持Markdown格式", Required: true},
-			"category_id": {Type: schema.Integer, Desc: "分类ID", Required: true},
-			"keywords":    {Type: schema.String, Desc: "关键词，多个用逗号分隔"},
-			"description": {Type: schema.String, Desc: "文档摘要/描述"},
-			"logo":        {Type: schema.String, Desc: "封面图片URL"},
-			"status":      {Type: schema.Integer, Desc: "状态：0=草稿，1=已发布，默认0（草稿）"},
-			"tags":        {Type: schema.Array, Desc: "标签列表，JSON数组格式如 [\"tag1\",\"tag2\"]"},
+			"title":        {Type: schema.String, Desc: "文档标题", Required: true},
+			"content":      {Type: schema.String, Desc: "文档内容，支持Markdown格式", Required: true},
+			"category_id":  {Type: schema.Integer, Desc: "分类ID", Required: true},
+			"keywords":     {Type: schema.String, Desc: "关键词，多个用逗号分隔"},
+			"description":  {Type: schema.String, Desc: "文档摘要/描述"},
+			"logo":         {Type: schema.String, Desc: "封面图片URL"},
+			"draft":        {Type: schema.Boolean, Desc: "状态：true=草稿，false=发布"},
+			"created_time": {Type: schema.Integer, Desc: "创建时间，Unix时间戳，默认当前时间，大于当前时间时将使用指定时间创建文档"},
+			"tags":         {Type: schema.Array, Desc: "标签列表，JSON数组格式如 [\"tag1\",\"tag2\"]"},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args struct {
@@ -232,7 +229,8 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			Keywords    string   `json:"keywords"`
 			Description string   `json:"description"`
 			Logo        string   `json:"logo"`
-			Status      int      `json:"status"`
+			Draft       bool     `json:"draft"`
+			CreatedTime int64    `json:"created_time"`
 			Tags        []string `json:"tags"`
 		}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
@@ -257,15 +255,11 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			CategoryId:  args.CategoryID,
 			Keywords:    args.Keywords,
 			Description: args.Description,
+			CreatedTime: args.CreatedTime,
 			Tags:        args.Tags,
 		}
 		if args.Logo != "" {
 			req.Images = []string{args.Logo}
-		}
-		if args.Status == 1 {
-			req.Draft = false
-		} else {
-			req.Draft = true
 		}
 		archive, err := w.SaveArchive(req)
 		if err != nil {
@@ -340,15 +334,16 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		Name: "archive_update",
 		Desc: "编辑已有文档。需要传入文档ID。仅传入的字段会被更新，未传入的字段保持不变。支持修改标题、内容、分类、关键词、描述、封面图、标签。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"id":          {Type: schema.Integer, Desc: "文档ID", Required: true},
-			"title":       {Type: schema.String, Desc: "文档标题"},
-			"content":     {Type: schema.String, Desc: "文档内容，支持Markdown格式"},
-			"category_id": {Type: schema.Integer, Desc: "分类ID"},
-			"keywords":    {Type: schema.String, Desc: "关键词，多个用逗号分隔"},
-			"description": {Type: schema.String, Desc: "文档摘要/描述"},
-			"logo":        {Type: schema.String, Desc: "封面图片URL"},
-			"status":      {Type: schema.Integer, Desc: "状态：0=草稿，1=已发布"},
-			"tags":        {Type: schema.Array, Desc: "标签列表，JSON数组格式如 [\"tag1\",\"tag2\"]"},
+			"id":           {Type: schema.Integer, Desc: "文档ID", Required: true},
+			"title":        {Type: schema.String, Desc: "文档标题"},
+			"content":      {Type: schema.String, Desc: "文档内容，支持Markdown格式"},
+			"category_id":  {Type: schema.Integer, Desc: "分类ID"},
+			"keywords":     {Type: schema.String, Desc: "关键词，多个用逗号分隔"},
+			"description":  {Type: schema.String, Desc: "文档摘要/描述"},
+			"logo":         {Type: schema.String, Desc: "封面图片URL"},
+			"draft":        {Type: schema.Boolean, Desc: "状态：true=草稿，false=发布"},
+			"created_time": {Type: schema.Integer, Desc: "创建时间，Unix时间戳，默认当前时间，大于当前时间时将使用指定时间创建文档"},
+			"tags":         {Type: schema.Array, Desc: "标签列表，JSON数组格式如 [\"tag1\",\"tag2\"]"},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args struct {
@@ -359,7 +354,8 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			Keywords    string   `json:"keywords"`
 			Description string   `json:"description"`
 			Logo        string   `json:"logo"`
-			Status      int      `json:"status"`
+			Draft       bool     `json:"draft"`
+			CreatedTime int64    `json:"created_time"`
 			Tags        []string `json:"tags"`
 		}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
@@ -407,14 +403,11 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		if args.Logo != "" {
 			req.Images = []string{args.Logo}
 		}
-		if args.Status == 1 {
-			req.Draft = false
-		} else if args.Status == 0 {
-			req.Draft = true
-		}
 		if len(args.Tags) > 0 {
 			req.Tags = args.Tags
 		}
+		// 使用QuickSave，避免其它字段覆盖
+		req.UpdateAll = false
 		archive, err = w.SaveArchive(req)
 		if err != nil {
 			return "", fmt.Errorf("更新文档失败: %w", err)
@@ -484,8 +477,10 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		if len(mod.Fields) > 0 {
 			b.WriteString(fmt.Sprintf("自定义字段: %d 个\n", len(mod.Fields)))
 			for _, f := range mod.Fields {
-				b.WriteString(fmt.Sprintf("  - %s (%s, %s)\n", f.FieldName, f.Type, f.Name))
+				b.WriteString(fmt.Sprintf("  - %s (%s, %s),字段内容、默认值: %s\n", f.FieldName, f.Type, f.Name, strings.ReplaceAll(f.Content, "\n", ",")))
 			}
+		} else {
+			b.WriteString("无自定义字段。\n")
 		}
 		return b.String(), nil
 	})
@@ -500,17 +495,77 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			"name":        {Type: schema.String, Desc: "模型标识"},
 			"keywords":    {Type: schema.String, Desc: "关键词"},
 			"description": {Type: schema.String, Desc: "描述"},
-			"status":      {Type: schema.Integer, Desc: "状态：1=启用，0=禁用，默认1"},
+			"status":      {Type: schema.Integer, Desc: "状态：1=启用，-1=禁用，默认1"},
+			"fields": {
+				Type: schema.Array,
+				Desc: "自定义字段",
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.Object,
+					Desc: "字段信息",
+					SubParams: map[string]*schema.ParameterInfo{
+						"field_name": {
+							Type:     schema.String,
+							Desc:     "字段名",
+							Required: true,
+						},
+						"name": {
+							Type:     schema.String,
+							Desc:     "字段描述",
+							Required: true,
+						},
+						"type": {
+							Type:     schema.String,
+							Desc:     "字段类型，text|textarea|select|checkbox|radio|number|texts|editor|image|images|file",
+							Required: true,
+						},
+						"content": {
+							Type: schema.String,
+							Desc: "字段内容、默认值，type为checkbox、radio、select时为选项列表，多个选项用英文逗号分隔",
+						},
+					},
+				},
+			},
+			"category_fields": {
+				Type: schema.Array,
+				Desc: "自定义字段",
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.Object,
+					Desc: "字段信息",
+					SubParams: map[string]*schema.ParameterInfo{
+						"field_name": {
+							Type:     schema.String,
+							Desc:     "字段名",
+							Required: true,
+						},
+						"name": {
+							Type:     schema.String,
+							Desc:     "字段描述",
+							Required: true,
+						},
+						"type": {
+							Type:     schema.String,
+							Desc:     "字段类型，text|textarea|select|checkbox|radio|number|texts|editor|image|images|file",
+							Required: true,
+						},
+						"content": {
+							Type: schema.String,
+							Desc: "字段内容、默认值，type为checkbox、radio、select时为选项列表，多个选项用英文逗号分隔",
+						},
+					},
+				},
+			},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args struct {
-			Title       string `json:"title"`
-			TableName   string `json:"table_name"`
-			UrlToken    string `json:"url_token"`
-			Name        string `json:"name"`
-			Keywords    string `json:"keywords"`
-			Description string `json:"description"`
-			Status      uint   `json:"status"`
+			Title          string               `json:"title"`
+			TableName      string               `json:"table_name"`
+			UrlToken       string               `json:"url_token"`
+			Name           string               `json:"name"`
+			Keywords       string               `json:"keywords"`
+			Description    string               `json:"description"`
+			Status         int                  `json:"status"`
+			Fields         []config.CustomField `json:"fields"`
+			CategoryFields []config.CustomField `json:"category_fields"`
 		}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
@@ -529,23 +584,194 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		if w == nil || w.DB == nil {
 			return "错误：站点未初始化", nil
 		}
-		if args.Status == 0 {
+		if args.Status == -1 {
+			args.Status = 0
+		} else {
 			args.Status = 1
 		}
+		if args.Fields != nil {
+			for i := range args.Fields {
+				args.Fields[i].FieldName = strings.ToLower(args.Fields[i].FieldName)
+				args.Fields[i].Content = strings.ReplaceAll(args.Fields[i].Content, ",", "\n")
+			}
+		}
 		req := &request.ModuleRequest{
-			Title:       args.Title,
-			TableName:   args.TableName,
-			UrlToken:    args.UrlToken,
-			Name:        args.Name,
-			Keywords:    args.Keywords,
-			Description: args.Description,
-			Status:      args.Status,
+			Title:          args.Title,
+			TableName:      args.TableName,
+			UrlToken:       args.UrlToken,
+			Name:           args.Name,
+			Keywords:       args.Keywords,
+			Description:    args.Description,
+			Status:         uint(args.Status),
+			Fields:         args.Fields,
+			CategoryFields: args.CategoryFields,
 		}
 		mod, err := w.SaveModule(req)
 		if err != nil {
 			return "", fmt.Errorf("创建模型失败: %w", err)
 		}
 		return fmt.Sprintf("模型创建成功！ID: %d, 名称: %s, 表名: %s", mod.Id, mod.Title, mod.TableName), nil
+	})
+
+	add(&schema.ToolInfo{
+		Name: "module_update",
+		Desc: "修改模型。必填字段：模型ID。数据库表名不可修改。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":          {Type: schema.Integer, Desc: "模型ID", Required: true},
+			"title":       {Type: schema.String, Desc: "模型名称"},
+			"table_name":  {Type: schema.String, Desc: "数据库表名（英文小写）"},
+			"url_token":   {Type: schema.String, Desc: "URL别名"},
+			"name":        {Type: schema.String, Desc: "模型标识"},
+			"keywords":    {Type: schema.String, Desc: "关键词"},
+			"description": {Type: schema.String, Desc: "描述"},
+			"status":      {Type: schema.Integer, Desc: "状态：1=启用，-1=禁用，默认1"},
+			"fields": {
+				Type: schema.Array,
+				Desc: "自定义字段",
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.Object,
+					Desc: "字段信息",
+					SubParams: map[string]*schema.ParameterInfo{
+						"field_name": {
+							Type:     schema.String,
+							Desc:     "字段名",
+							Required: true,
+						},
+						"name": {
+							Type:     schema.String,
+							Desc:     "字段描述",
+							Required: true,
+						},
+						"type": {
+							Type:     schema.String,
+							Desc:     "字段类型，text|textarea|select|checkbox|radio|number|texts|editor|image|images|file",
+							Required: true,
+						},
+						"content": {
+							Type: schema.String,
+							Desc: "字段内容、默认值，type为checkbox、radio、select时为选项列表，多个选项用英文逗号分隔",
+						},
+					},
+				},
+			},
+			"category_fields": {
+				Type: schema.Array,
+				Desc: "自定义字段",
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.Object,
+					Desc: "字段信息",
+					SubParams: map[string]*schema.ParameterInfo{
+						"field_name": {
+							Type:     schema.String,
+							Desc:     "字段名",
+							Required: true,
+						},
+						"name": {
+							Type:     schema.String,
+							Desc:     "字段描述",
+							Required: true,
+						},
+						"type": {
+							Type:     schema.String,
+							Desc:     "字段类型，text|textarea|select|checkbox|radio|number|texts|editor|image|images|file",
+							Required: true,
+						},
+						"content": {
+							Type: schema.String,
+							Desc: "字段内容、默认值，type为checkbox、radio、select时为选项列表，多个选项用英文逗号分隔",
+						},
+					},
+				},
+			},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			ID             uint                 `json:"id"`
+			Title          string               `json:"title"`
+			TableName      string               `json:"table_name"`
+			UrlToken       string               `json:"url_token"`
+			Name           string               `json:"name"`
+			Keywords       string               `json:"keywords"`
+			Description    string               `json:"description"`
+			Status         int                  `json:"status"`
+			Fields         []config.CustomField `json:"fields"`
+			CategoryFields []config.CustomField `json:"category_fields"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.ID == 0 {
+			return "错误：模型ID不存在", nil
+		}
+		if args.TableName == "" {
+			return "错误：表名不能为空", nil
+		}
+		args.TableName = strings.ToLower(args.TableName)
+		if args.UrlToken == "" {
+			args.UrlToken = args.TableName
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		exist, err := w.GetModuleById(args.ID)
+		if err != nil {
+			return "错误：模型不存在", nil
+		}
+		if args.Status == -1 {
+			args.Status = 0
+		} else {
+			args.Status = 1
+		}
+		if args.Fields != nil {
+			for i := range args.Fields {
+				args.Fields[i].FieldName = strings.ToLower(args.Fields[i].FieldName)
+				args.Fields[i].Content = strings.ReplaceAll(args.Fields[i].Content, ",", "\n")
+			}
+		}
+
+		req := &request.ModuleRequest{
+			Id:             args.ID,
+			Title:          args.Title,
+			TableName:      args.TableName,
+			UrlToken:       args.UrlToken,
+			Name:           args.Name,
+			Keywords:       args.Keywords,
+			Description:    args.Description,
+			Status:         uint(args.Status),
+			Fields:         args.Fields,
+			CategoryFields: args.CategoryFields,
+			UpdateAll:      false,
+		}
+		if req.Title == "" {
+			req.Title = exist.Title
+		}
+		if req.TableName == "" {
+			req.TableName = exist.TableName
+		}
+		if req.UrlToken == "" {
+			req.UrlToken = exist.UrlToken
+		}
+		if req.Name == "" {
+			req.Name = exist.Name
+		}
+		if req.Keywords == "" {
+			req.Keywords = exist.Keywords
+		}
+		if req.Description == "" {
+			req.Description = exist.Description
+		}
+		if req.Fields == nil {
+			req.Fields = exist.Fields
+		}
+		if req.CategoryFields == nil {
+			req.CategoryFields = exist.CategoryFields
+		}
+		mod, err := w.SaveModule(req)
+		if err != nil {
+			return "", fmt.Errorf("修改模型失败: %w", err)
+		}
+		return fmt.Sprintf("模型修改成功！ID: %d, 名称: %s, 表名: %s", mod.Id, mod.Title, mod.TableName), nil
 	})
 
 	add(&schema.ToolInfo{
@@ -870,7 +1096,6 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		if err != nil {
 			return "", fmt.Errorf("获取标签列表失败: %w", err)
 		}
-		log.Printf("tags = %#v", tags)
 		var b strings.Builder
 		b.WriteString(fmt.Sprintf("共 %d 个标签：\n\n", total))
 		for _, t := range tags {
@@ -1000,8 +1225,8 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 
 	// ---- Template tools ----
 	add(&schema.ToolInfo{
-		Name: "template_get_info",
-		Desc: "获取当前启用的模板信息。返回模板名称、类型、模板路径、以及所有模板文件列表。用于了解当前站点使用哪个模板。",
+		Name:        "template_get_info",
+		Desc:        "获取当前启用的模板信息。返回模板名称、类型、模板路径、以及所有模板文件列表。用于了解当前站点使用哪个模板。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -1226,8 +1451,8 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 	})
 
 	add(&schema.ToolInfo{
-		Name: "template_reload",
-		Desc: "重新加载模板。在修改了模板文件内容或切换模板后，需要调用此工具使更改生效。",
+		Name:        "template_reload",
+		Desc:        "重新加载模板。在修改了模板文件内容或切换模板后，需要调用此工具使更改生效。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -1284,6 +1509,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			ModuleId:  cat.ModuleId,
 			Images:    cat.Images,
 			IsInherit: cat.IsInherit,
+			UpdateAll: false,
 		}
 		changed := false
 		if args.Title != "" {
@@ -1350,6 +1576,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			Title:       tag.Title,
 			Description: tag.Description,
 			CategoryId:  tag.CategoryId,
+			UpdateAll:   false,
 		}
 		changed := false
 		if args.Title != "" {
@@ -1626,6 +1853,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 			Link:        args.Link,
 			Sort:        args.Sort,
 			Status:      args.Status,
+			UpdateAll:   false,
 		}
 		if req.Status == 0 {
 			req.Status = 1
@@ -1667,8 +1895,8 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 
 	// ---- Friend link tools ----
 	add(&schema.ToolInfo{
-		Name: "friendlink_list",
-		Desc: "获取友情链接列表，按排序值排列。",
+		Name:        "friendlink_list",
+		Desc:        "获取友情链接列表，按排序值排列。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -1815,8 +2043,8 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 
 	// ---- Website info tool ----
 	add(&schema.ToolInfo{
-		Name: "website_info",
-		Desc: "获取当前站点基本信息，包括站点名称、Logo、联系方式、备案号等。",
+		Name:        "website_info",
+		Desc:        "获取当前站点基本信息，包括站点名称、Logo、联系方式、备案号等。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -1902,8 +2130,8 @@ SEO信息：
 
 	// ---- Sitemap & Push tools ----
 	add(&schema.ToolInfo{
-		Name: "sitemap_rebuild",
-		Desc: "重新生成站点地图(sitemap)。生成后搜索引擎能更快发现新内容。",
+		Name:        "sitemap_rebuild",
+		Desc:        "重新生成站点地图(sitemap)。生成后搜索引擎能更快发现新内容。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2335,8 +2563,8 @@ SEO信息：
 		return b.String(), nil
 	})
 	add(&schema.ToolInfo{
-		Name: "statistic_spider",
-		Desc: "查看近30天的爬虫访问趋势数据（按天汇总各爬虫访问次数）。",
+		Name:        "statistic_spider",
+		Desc:        "查看近30天的爬虫访问趋势数据（按天汇总各爬虫访问次数）。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2372,8 +2600,8 @@ SEO信息：
 		return b.String(), nil
 	})
 	add(&schema.ToolInfo{
-		Name: "statistic_traffic",
-		Desc: "查看近30天的网站流量趋势数据（PV/IP按天汇总）。",
+		Name:        "statistic_traffic",
+		Desc:        "查看近30天的网站流量趋势数据（PV/IP按天汇总）。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2417,8 +2645,8 @@ SEO信息：
 
 	// ---- Plugin tools (P4) ----
 	add(&schema.ToolInfo{
-		Name: "plugin_robots_get",
-		Desc: "查看当前的 robots.txt 内容。",
+		Name:        "plugin_robots_get",
+		Desc:        "查看当前的 robots.txt 内容。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2454,8 +2682,8 @@ SEO信息：
 		return "robots.txt 已更新", nil
 	})
 	add(&schema.ToolInfo{
-		Name: "plugin_rewrite_get",
-		Desc: "查看当前的 URL 重写（伪静态）配置。",
+		Name:        "plugin_rewrite_get",
+		Desc:        "查看当前的 URL 重写（伪静态）配置。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2479,8 +2707,8 @@ SEO信息：
 		return fmt.Sprintf("URL 重写配置：\n模式: %s (%d)\n规则: %s", modeStr, w.PluginRewrite.Mode, w.PluginRewrite.Patten), nil
 	})
 	add(&schema.ToolInfo{
-		Name: "plugin_htmlcache_build",
-		Desc: "生成静态 HTML 缓存。此操作会在后台异步执行，完成后能大幅提升页面访问速度。",
+		Name:        "plugin_htmlcache_build",
+		Desc:        "生成静态 HTML 缓存。此操作会在后台异步执行，完成后能大幅提升页面访问速度。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2497,8 +2725,8 @@ SEO信息：
 		return "HTML 缓存生成任务已提交（首页+文章详情页），请在后台查看进度", nil
 	})
 	add(&schema.ToolInfo{
-		Name: "plugin_fulltext_rebuild",
-		Desc: "重建全文搜索索引。此操作会关闭现有索引并重新构建。",
+		Name:        "plugin_fulltext_rebuild",
+		Desc:        "重建全文搜索索引。此操作会关闭现有索引并重新构建。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2513,8 +2741,8 @@ SEO信息：
 		return "全文搜索索引重建任务已提交，后台异步执行中", nil
 	})
 	add(&schema.ToolInfo{
-		Name: "plugin_backup_dump",
-		Desc: "备份数据库。此操作会导出完整的数据库结构和数据到备份文件，后台异步执行。",
+		Name:        "plugin_backup_dump",
+		Desc:        "备份数据库。此操作会导出完整的数据库结构和数据到备份文件，后台异步执行。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site

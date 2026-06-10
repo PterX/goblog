@@ -565,7 +565,19 @@ func ArchiveDetailForm(ctx iris.Context) {
 			return
 		}
 	}
-
+	if len(req.Images) == 0 {
+		req.RemoveImage = true
+	}
+	if len(req.Tags) == 0 {
+		req.RemoveTag = true
+	}
+	if len(req.Flags) == 0 {
+		req.RemoveFlag = true
+	}
+	if len(req.RelationIds) == 0 {
+		req.RemoveRelationIds = true
+	}
+	req.UpdateAll = true
 	archive, err := currentSite.SaveArchive(&req)
 	if err != nil {
 		ctx.JSON(iris.Map{

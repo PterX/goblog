@@ -340,7 +340,7 @@ func ApiImportArchive(ctx iris.Context) {
 			}
 		}
 	}
-
+	req.UpdateAll = true
 	archive, err := currentSite.SaveArchive(&req)
 	if err != nil {
 		ctx.JSON(iris.Map{

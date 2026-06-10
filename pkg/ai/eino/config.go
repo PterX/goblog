@@ -11,15 +11,15 @@ import (
 
 // Config holds the configuration for Eino AI integration.
 type Config struct {
-	APIKey           string  `json:"api_key"`
-	Model            string  `json:"model"`
-	BaseURL          string  `json:"base_url"`
-	MaxTokens        int     `json:"max_tokens"`
+	APIKey          string  `json:"api_key"`
+	Model           string  `json:"model"`
+	BaseURL         string  `json:"base_url"`
+	MaxTokens       int     `json:"max_tokens"`
 	EnableReasoning bool    `json:"enable_reasoning"`
-	Temperature      float64 `json:"temperature"`
-	TimeoutSeconds   int     `json:"timeout_seconds"`
-	MaxRetries       int     `json:"max_retries"`
-	ProviderType     string  `json:"provider_type"` // "openai" or "wukong" or "custom"
+	Temperature     float64 `json:"temperature"`
+	TimeoutSeconds  int     `json:"timeout_seconds"`
+	MaxRetries      int     `json:"max_retries"`
+	ProviderType    string  `json:"provider_type"` // "openai" or "wukong" or "custom"
 }
 
 // Global instance
@@ -60,6 +60,7 @@ func SetGlobalConfig(cfg *Config) error {
 	if cfg.MaxRetries == 0 {
 		cfg.MaxRetries = 3
 	}
+	cfg.EnableReasoning = true
 
 	globalConfigMu.Lock()
 	globalConfig = cfg

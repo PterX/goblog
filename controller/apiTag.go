@@ -1308,7 +1308,7 @@ func ApiArchivePublish(ctx iris.Context) {
 			"value": extraReq[k],
 		}
 	}
-
+	req.UpdateAll = true
 	archive, err := currentSite.SaveArchive(&req)
 	if err != nil {
 		ctx.JSON(iris.Map{

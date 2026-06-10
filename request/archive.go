@@ -33,10 +33,16 @@ type Archive struct {
 	RelationIds  []int64                `json:"relation_ids"` // 相关文档的ID
 	Views        uint                   `json:"views"`        // 浏览量
 
+	RemoveTag         bool `json:"-"` // 是否删除标签
+	RemoveImage       bool `json:"-"` // 是否删除图片
+	RemoveFlag        bool `json:"-"` // 是否删除flag
+	RemoveRelationIds bool `json:"-"` // 是否删除关联文档
+
 	// 是否强制保存
 	ForceSave  bool   `json:"force_save"`
 	ToLanguage string `json:"to_language"`
 	QuickSave  bool   `json:"quick_save"`
+	UpdateAll  bool   `json:"update_all"`
 
 	KeywordId   uint   `json:"keyword_id"`
 	OriginUrl   string `json:"origin_url"`

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"regexp"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"kandaoni.com/anqicms/config"
 	"kandaoni.com/anqicms/library"
 	"kandaoni.com/anqicms/model"
+	"kandaoni.com/anqicms/pkg/ai/eino"
 	"kandaoni.com/anqicms/response"
 )
 
@@ -65,6 +67,7 @@ const (
 	CurrencySettingKey      = "currency"
 	CommunicationSettingKey = "communication"
 	LLMsSettingKey          = "llms"
+	AiSettingKey            = "ai_setting"
 
 	CollectorSettingKey = "collector"
 	KeywordSettingKey   = "keyword"
@@ -127,6 +130,7 @@ func (w *Website) InitSetting() {
 	w.LoadTranslateSetting(settingMap[TranslateSettingKey])
 	w.LoadJsonLdSetting(settingMap[JsonLdSettingKey])
 	w.LoadLLMsSetting(settingMap[LLMsSettingKey])
+	w.LoadAiSetting(settingMap[AiSettingKey])
 	// 检查OpenAIAPI是否可用
 	go w.CheckOpenAIAPIValid()
 }
@@ -767,6 +771,20 @@ func (w *Website) LoadLLMsSetting(value string) {
 	}
 
 	return
+}
+
+func (w *Website) LoadAiSetting(value string) {
+	var setting eino.Config
+
+	if err := json.Unmarshal([]byte(value), &setting); err != nil {
+		return
+	}
+
+	if err := eino.SetGlobalConfig(&setting); err != nil {
+		slog.Error("Failed to initialize AI client", "error", err)
+	} else {
+		slog.Info("AI client initialized successfully")
+	}
 }
 
 func (w *Website) GetDiyFieldSetting() []config.CustomField {
