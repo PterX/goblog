@@ -245,6 +245,9 @@ func init() {
 			"parent_id": &graphql.Field{
 				Type: graphql.Int,
 			},
+			"place_id": &graphql.Field{
+				Type: graphql.Int,
+			},
 			"created_time": &graphql.Field{
 				Type: graphql.Int,
 			},
@@ -1108,6 +1111,9 @@ func init() {
 						Type: graphql.Boolean,
 					},
 					"parent_id": &graphql.ArgumentConfig{
+						Type: graphql.Int,
+					},
+					"place_id": &graphql.ArgumentConfig{
 						Type: graphql.Int,
 					},
 					"category_id": &graphql.ArgumentConfig{

@@ -456,6 +456,12 @@ type PluginLLMsConfig struct {
 	LLMSEndDescription   string `json:"llms_end_description"`   // 附加在LLMs.txt文件底部的结尾文本（例如页脚、联系方式或免责声明信息）。
 }
 
+type PluginPlaceConfig struct {
+	Open    bool          `json:"open"`
+	UrlType string        `json:"url_type"` // URL形式，subdomain|directory,默认：directory
+	Fields  []CustomField `json:"fields"`   // 自定义字段
+}
+
 func (g *CustomField) SplitContent() []string {
 	var items []string
 	contents := strings.Split(g.Content, "\n")

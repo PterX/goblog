@@ -120,6 +120,7 @@ func ApiArchiveList(ctx iris.Context) {
 	currentSite := provider.CurrentSite(ctx)
 	archiveId := ctx.URLParamInt64Default("id", 0)
 	parentId := ctx.URLParamInt64Default("parentId", 0)
+	placeId := ctx.URLParamInt64Default("placeId", 0)
 	moduleId := uint(ctx.URLParamIntDefault("moduleId", 0))
 	authorId := uint(ctx.URLParamIntDefault("authorId", 0))
 	userId := uint(ctx.URLParamIntDefault("userId", 0))
@@ -239,6 +240,7 @@ func ApiArchiveList(ctx iris.Context) {
 		Id:                 archiveId,
 		Render:             render,
 		ParentId:           int64(parentId),
+		PlaceId:            int64(placeId),
 		CategoryIds:        categoryIds,
 		ExcludeCategoryIds: excludeCategoryIds,
 		ModuleId:           int64(moduleId),
@@ -972,6 +974,91 @@ func ApiTagList(ctx iris.Context) {
 		"msg":   "",
 		"total": total,
 		"data":  tagList,
+	})
+}
+
+func ApiPlaceDetail(ctx iris.Context) {
+	currentSite := provider.CurrentSite(ctx)
+	if currentSite.PluginPlace.Open == false {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("NotOpen"),
+		})
+		return
+	}
+	id := uint(ctx.URLParamIntDefault("id", 0))
+	filename := ctx.URLParam("filename")
+	// 只有content字段有效
+	render := currentSite.Content.Editor == "markdown"
+	if ctx.URLParamExists("render") {
+		render, _ = ctx.URLParamBool("render")
+	}
+
+	req := &request.ApiPlaceRequest{
+		Id:       int64(id),
+		UrlToken: filename,
+		Render:   render,
+	}
+
+	place, err := currentSite.ApiGetPlace(req)
+	if err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "",
+		"data": place,
+	})
+}
+
+func ApiPlaceList(ctx iris.Context) {
+	currentSite := provider.CurrentSite(ctx)
+	if currentSite.PluginPlace.Open == false {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("NotOpen"),
+		})
+		return
+	}
+	parentId := uint(ctx.URLParamIntDefault("parentId", 0))
+	all := ctx.URLParamBoolDefault("all", false)
+	limit := 0
+	offset := 0
+	limitTmp := ctx.URLParam("limit")
+	if limitTmp != "" {
+		limitArgs := strings.Split(limitTmp, ",")
+		if len(limitArgs) == 2 {
+			offset, _ = strconv.Atoi(limitArgs[0])
+			limit, _ = strconv.Atoi(limitArgs[1])
+		} else if len(limitArgs) == 1 {
+			limit, _ = strconv.Atoi(limitArgs[0])
+		}
+		if limit > currentSite.Content.MaxLimit {
+			limit = currentSite.Content.MaxLimit
+		}
+		if limit < 1 {
+			limit = 1
+		}
+	}
+
+	req := &request.ApiPlaceListRequest{
+		ParentId: int64(parentId),
+		All:      all,
+		Limit:    limit,
+		Offset:   offset,
+	}
+
+	places, _ := currentSite.ApiGetPlaces(req)
+
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "",
+		"data": places,
 	})
 }
 

@@ -3,6 +3,7 @@ package library
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"testing"
 )
 
@@ -64,4 +65,14 @@ func TestParseContentTitles(t *testing.T) {
 		}
 	}
 	log.Println(content)
+}
+
+func TestParseURL(t *testing.T) {
+	link := "https://www.google.com/search?q=hello+world"
+	parsed, err := url.Parse(link)
+	if err != nil {
+		log.Println(err)
+	} else {
+		log.Println(parsed.Scheme, parsed.Host, parsed.Path, parsed.RawQuery)
+	}
 }

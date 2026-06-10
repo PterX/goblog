@@ -582,6 +582,15 @@ func manageRoute(app *iris.Application) {
 				llms.Get("/setting", manageController.PluginGetLLMsSetting)
 				llms.Post("/setting", manageController.PluginSaveLLMsSetting)
 			}
+			place := plugin.Party("/place")
+			{
+				place.Get("/setting", manageController.PluginGetPlaceSetting)
+				place.Post("/setting", manageController.PluginSavePlaceSetting)
+				place.Get("/list", manageController.PluginPlaceList)
+				place.Get("/detail", manageController.PlaceDetail)
+				place.Post("/detail", manageController.PlaceDetailForm)
+				place.Post("/delete", manageController.PlaceDelete)
+			}
 		}
 	}
 }

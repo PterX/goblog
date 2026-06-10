@@ -36,6 +36,7 @@ type Website struct {
 	Mysql                   *config.MysqlConfig
 	Initialed               bool
 	ErrorMsg                string // 错误提示
+	Scheme                  string
 	Host                    string
 	BaseURI                 string
 	RootPath                string
@@ -95,6 +96,7 @@ type Website struct {
 	PluginTranslate    *config.PluginTranslateConfig
 	PluginJsonLd       *config.PluginJsonLdConfig
 	PluginLLMs         *config.PluginLLMsConfig
+	PluginPlace        *config.PluginPlaceConfig
 
 	sensitiveAcMatcher *library.AhoCorasick
 	sensitiveRegexes   []*regexp.Regexp
@@ -326,6 +328,7 @@ func InitWebsite(mw *model.Website) {
 		TokenSecret:  mw.TokenSecret,
 		Mysql:        &mw.Mysql,
 		DB:           db,
+		Scheme:       "http",
 		BaseURI:      "/",
 		RootPath:     mw.RootPath,
 		CachePath:    mw.RootPath + "cache/",
@@ -375,6 +378,7 @@ func InitWebsite(mw *model.Website) {
 			if parsed.RequestURI() != "/" {
 				w.BaseURI = parsed.RequestURI()
 			}
+			w.Scheme = parsed.Scheme
 			w.Host = parsed.Host
 		}
 	}
@@ -541,9 +545,29 @@ func matchRootAndFallback(sites []*Website, host string, ctx iris.Context) *Webs
 				return handleHostMatch(w, ctx)
 			}
 
-			//if isSubdomainMatch(parsed.Hostname(), host) {
-			//	return cloneWithContext(w, ctx)
-			//}
+			// 这里匹配子域名，模型、地点用到
+			if w.PluginPlace.Open && w.PluginPlace.UrlType == config.PlaceUrlTypeSubdomain {
+				var subdomain string
+				var topDomain string
+				subIndex := strings.Index(host, ".")
+				if subIndex > 0 {
+					// 获取子域名
+					subdomain = host[:subIndex]
+					topDomain = host[subIndex+1:]
+				}
+				hostName := parsed.Hostname()
+				if strings.HasSuffix(hostName, topDomain) {
+					// 同域名，继续处理
+					place := w.GetPlaceFromCacheByToken(subdomain)
+					if place != nil {
+						// 模型、地点的子域名
+						ctx.Values().Set("place", place)
+						ctx.ViewData("place", place)
+
+						return cloneWithContext(w, ctx)
+					}
+				}
+			}
 		}
 	}
 	return nil
@@ -616,7 +640,16 @@ func isHostMatch(parsed *url.URL, host string) bool {
 
 // 子域名匹配检查
 func isSubdomainMatch(parsedHost, currentHost string) bool {
-	return strings.HasSuffix(parsedHost, "."+currentHost)
+	// 先移除 the first subdomain
+	topDomain := strings.SplitN(parsedHost, ".", 2)[1]
+	if strings.Count(topDomain, ".") == 1 {
+		topDomain = parsedHost
+	}
+	if strings.HasSuffix(currentHost, "."+topDomain) {
+		return true
+	}
+
+	return false
 }
 
 // 处理匹配到的网站

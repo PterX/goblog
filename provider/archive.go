@@ -646,6 +646,7 @@ func (w *Website) SaveArchive(req *request.Archive) (*model.Archive, error) {
 	// 正常的保存行为
 	draft.ModuleId = category.ModuleId
 	draft.ParentId = req.ParentId
+	draft.PlaceId = req.PlaceId
 	draft.Title = req.Title
 	draft.SeoTitle = req.SeoTitle
 	draft.Keywords = req.Keywords
@@ -2458,6 +2459,12 @@ func (qia *QuickImportArchive) startExcel(file multipart.File) error {
 			tmpId, _ := strconv.ParseInt(row[colId], 10, 64)
 			if tmpId > 0 {
 				archive.ParentId = tmpId
+			}
+		}
+		if colId, ok := existFields["place_id"]; ok {
+			tmpId, _ := strconv.ParseInt(row[colId], 10, 64)
+			if tmpId > 0 {
+				archive.PlaceId = uint(tmpId)
 			}
 		}
 		if colId, ok := existFields["logo"]; ok {

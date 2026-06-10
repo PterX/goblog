@@ -554,6 +554,12 @@ func ReRouteContext(ctx iris.Context) {
 	case provider.PatternPeople:
 		UserPage(ctx)
 		return
+	case provider.PatternPlaceIndex:
+		PlaceIndex(ctx)
+		return
+	case provider.PatternPlace:
+		PlacePage(ctx)
+		return
 	case provider.PatternCommon:
 		Common(ctx)
 		return
@@ -613,9 +619,31 @@ func ParseRoute(ctx iris.Context) (map[string]string, bool) {
 		provider.PatternTag,          // 标签详情
 		provider.PatternPage,         // 单页
 		provider.PatternCategory,     // 分类列表
-		provider.PatternArchive,      // 文章详情
 		//	provider.PatternCommon,       // common 处理逻辑
 	}
+	// 匹配place，放在最开头解析
+	if currentSite.PluginPlace.Open {
+		placePattern := []string{provider.PatternPlaceIndex}
+		if currentSite.PluginPlace.UrlType == config.PlaceUrlTypeDirectory {
+			// 检查place
+			if strings.Index(paramValue, "/") > 0 {
+				splitValue := strings.SplitN(paramValue, "/", 2)
+				place := currentSite.GetPlaceFromCacheByToken(splitValue[0])
+				if place != nil {
+					// 匹配place
+					ctx.Values().Set("place", place)
+					ctx.ViewData("place", place)
+					paramValue = splitValue[1]
+				}
+			}
+			// end
+
+			placePattern = append(placePattern, provider.PatternPlace)
+		}
+
+		ruleNames = append(placePattern, ruleNames...)
+	}
+
 	// 添加自定义模块规则
 	modules := currentSite.GetCacheModules()
 	for x := range modules {
@@ -625,6 +653,9 @@ func ParseRoute(ctx iris.Context) (map[string]string, bool) {
 			ruleNames = append(ruleNames, diyName)
 		}
 	}
+	// 文章详情放最后解析
+	ruleNames = append(ruleNames, provider.PatternArchive)
+
 	// end
 	for _, ruleName := range ruleNames {
 		reg := regexp.MustCompile(rewritePattern.Rules[ruleName])
@@ -650,6 +681,15 @@ func ParseRoute(ctx iris.Context) (map[string]string, bool) {
 				if len(match) == 3 {
 					matchMap["module"] = match[2]
 				}
+			}
+			if ruleName == provider.PatternPlace {
+				// 检查第一个是否是place
+				place := currentSite.GetPlaceFromCacheByToken(matchMap["filename"])
+				if place != nil {
+					return matchMap, true
+				}
+				matchMap = map[string]string{}
+				continue
 			}
 			if ruleName == provider.PatternArchiveIndex {
 				// 这个规则可能与下面的冲突，因此检查一遍
@@ -710,70 +750,6 @@ func ParseRoute(ctx iris.Context) (map[string]string, bool) {
 				continue
 			}
 			if ruleName == provider.PatternArchive {
-				// 需要先处理模型自定义规则，再处理默认的
-				// 支持模型自定义文档伪静态规则
-				modules := currentSite.GetCacheModules()
-				for x := range modules {
-					diyName := modules[x].UrlToken + ":archive"
-					_, ok := rewritePattern.Rules[diyName]
-					if ok {
-						reg = regexp.MustCompile(rewritePattern.Rules[diyName])
-						diyMatch := reg.FindStringSubmatch(paramValue)
-						if len(diyMatch) == 0 && strings.Contains(rewritePattern.Rules[diyName], "\\?") {
-							// 详情支持带问号的规则
-							paramValueWithArgs := strings.TrimPrefix(ctx.Request().RequestURI, "/")
-							// 去掉末尾的$,带问号的，后面只能跟&，否则就不匹配
-							reg = regexp.MustCompile(strings.TrimSuffix(rewritePattern.Rules[diyName], "$") + "([&#].*)?$")
-							diyMatch = reg.FindStringSubmatch(paramValueWithArgs)
-						}
-						if len(diyMatch) > 1 {
-							tmpMatchMap := map[string]string{}
-							tmpMatchMap["match"] = provider.PatternArchive
-							for i, v := range diyMatch {
-								iKey := i
-								key := rewritePattern.Tags[diyName][iKey]
-								if i == 0 {
-									key = "route"
-								}
-								tmpMatchMap[key] = v
-							}
-							if tmpMatchMap["module"] != "" && tmpMatchMap["module"] == modules[x].UrlToken {
-								// 需要先验证是否是module
-								return tmpMatchMap, true
-							} else {
-								preview := ctx.URLParam("preview")
-								// 由于可能导致重复，因此需要验证module
-								if tmpMatchMap["id"] != "" {
-									id, _ := strconv.ParseInt(tmpMatchMap["id"], 10, 64)
-									if id > 0 {
-										archive := currentSite.GetArchiveByIdFromCache(id)
-										if archive != nil && archive.ModuleId == modules[x].Id {
-											return tmpMatchMap, true
-										}
-										if preview != "" {
-											archiveDraft, _ := currentSite.GetArchiveDraftById(id)
-											if archiveDraft != nil && archiveDraft.ModuleId == modules[x].Id {
-												return tmpMatchMap, true
-											}
-										}
-									}
-								} else if tmpMatchMap["filename"] != "" {
-									archive := currentSite.GetArchiveByUrlTokenFromCache(tmpMatchMap["filename"])
-									if archive != nil && archive.ModuleId == modules[x].Id {
-										return tmpMatchMap, true
-									}
-									if preview != "" {
-										archiveDraft, _ := currentSite.GetArchiveDraftByUrlToken(tmpMatchMap["filename"])
-										if archiveDraft != nil && archiveDraft.ModuleId == modules[x].Id {
-											return tmpMatchMap, true
-										}
-									}
-								}
-								// end
-							}
-						}
-					}
-				}
 				if matchMap["module"] != "" {
 					// 需要先验证是否是module
 					module := currentSite.GetModuleFromCacheByToken(matchMap["module"])

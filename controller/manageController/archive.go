@@ -24,6 +24,7 @@ func ArchiveList(ctx iris.Context) {
 	categoryId := uint(ctx.URLParamIntDefault("category_id", 0))
 	moduleId := uint(ctx.URLParamIntDefault("module_id", 0))
 	parentId := ctx.URLParamInt64Default("parent_id", 0)
+	placeId := uint(ctx.URLParamIntDefault("place_id", 0))
 	status := ctx.URLParamDefault("status", "ok") // 支持 '':all，draft:0, ok:1, plan:2
 	sort := ctx.URLParamDefault("sort", "id")
 	flag := ctx.URLParam("flag")
@@ -101,6 +102,9 @@ func ArchiveList(ctx iris.Context) {
 			}
 			if parentId > 0 {
 				tx = tx.Where("`parent_id` = ?", parentId)
+			}
+			if placeId > 0 {
+				tx = tx.Where("`place_id` = ?", placeId)
 			}
 			if status == "delete" {
 				tx = tx.Where("`status` = ?", config.ContentStatusDelete)

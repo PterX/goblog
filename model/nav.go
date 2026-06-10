@@ -12,6 +12,7 @@ const (
 	NavTypeCategory = 1
 	NavTypeOutlink  = 2
 	NavTypeArchive  = 3
+	NavTypePlace    = 4
 )
 
 type Nav struct {

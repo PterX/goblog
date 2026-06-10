@@ -88,6 +88,7 @@ func resolveArchives(p graphql.ResolveParams) (interface{}, error) {
 
 	id, _ := p.Args["id"].(int)
 	parentId, _ := p.Args["parent_id"].(int)
+	placeId, _ := p.Args["place_id"].(int)
 	categoryId, _ := p.Args["category_id"].(int)
 	categoryIds, _ := p.Args["category_ids"].([]int)
 	if categoryId > 0 {
@@ -161,6 +162,7 @@ func resolveArchives(p graphql.ResolveParams) (interface{}, error) {
 		Id:                 int64(id),
 		Render:             render,
 		ParentId:           int64(parentId),
+		PlaceId:            int64(placeId),
 		CategoryIds:        categoryIds,
 		ExcludeCategoryIds: excludeCategoryIds,
 		ModuleId:           int64(moduleId),

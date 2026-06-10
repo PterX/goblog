@@ -65,6 +65,7 @@ const (
 	CurrencySettingKey      = "currency"
 	CommunicationSettingKey = "communication"
 	LLMsSettingKey          = "llms"
+	PlaceSettingKey         = "place"
 
 	CollectorSettingKey = "collector"
 	KeywordSettingKey   = "keyword"
@@ -127,6 +128,7 @@ func (w *Website) InitSetting() {
 	w.LoadTranslateSetting(settingMap[TranslateSettingKey])
 	w.LoadJsonLdSetting(settingMap[JsonLdSettingKey])
 	w.LoadLLMsSetting(settingMap[LLMsSettingKey])
+	w.LoadPlaceSetting(settingMap[PlaceSettingKey])
 	// 检查OpenAIAPI是否可用
 	go w.CheckOpenAIAPIValid()
 }
@@ -766,6 +768,19 @@ func (w *Website) LoadLLMsSetting(value string) {
 	}
 
 	if err := json.Unmarshal([]byte(value), w.PluginLLMs); err != nil {
+		return
+	}
+
+	return
+}
+
+func (w *Website) LoadPlaceSetting(value string) {
+	w.PluginPlace = &config.PluginPlaceConfig{}
+	if value == "" {
+		return
+	}
+
+	if err := json.Unmarshal([]byte(value), w.PluginPlace); err != nil {
 		return
 	}
 
