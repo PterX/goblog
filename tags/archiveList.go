@@ -45,6 +45,7 @@ func (node *tagArchiveListNode) Execute(ctx *pongo2.ExecutionContext, writer pon
 	var defaultCategoryId uint
 	var authorId = uint(0)
 	var parentId = int64(0)
+	var placeId = uint(0)
 	var tagIds []int64
 	var tag string
 	var argIds []int64
@@ -64,6 +65,9 @@ func (node *tagArchiveListNode) Execute(ctx *pongo2.ExecutionContext, writer pon
 	}
 	if args["parentId"] != nil {
 		parentId = int64(args["parentId"].Integer())
+	}
+	if args["placeId"] != nil {
+		placeId = uint(args["placeId"].Integer())
 	}
 	if args["tagId"] != nil {
 		tmpIds := strings.Split(args["tagId"].String(), ",")
@@ -334,6 +338,7 @@ func (node *tagArchiveListNode) Execute(ctx *pongo2.ExecutionContext, writer pon
 		Ids:                argIds,
 		Render:             render,
 		ParentId:           int64(parentId),
+		PlaceId:            int64(placeId),
 		CategoryIds:        categoryIds,
 		ExcludeCategoryIds: excludeCategoryIds,
 		ExcludeFlags:       excludeFlags,
@@ -401,6 +406,21 @@ func (node *tagArchiveListNode) Execute(ctx *pongo2.ExecutionContext, writer pon
 			ctxOri := currentSite.CtxOri()
 			if ctxOri != nil {
 				ctxOri.ViewData("listData", archives)
+			}
+		}
+	}
+	if currentSite.PluginJsonLd.Open {
+		// 公开 faqs|list 数据，方便json-ld调用
+		if args["jsonld"] != nil {
+			ctxOri := currentSite.CtxOri()
+			if ctxOri != nil {
+				jsonLdType := args["jsonld"].String()
+				if jsonLdType == "faqs" {
+					ctxOri.ViewData("faqs", archives)
+				} else {
+					// 默认list
+					ctxOri.ViewData("listData", archives)
+				}
 			}
 		}
 	}

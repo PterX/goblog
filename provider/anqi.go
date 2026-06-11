@@ -1335,7 +1335,6 @@ func (w *Website) AnqiGetImageAiResponse(req *AnqiImageAiRequest) (*AnqiAiImage,
 	if result.Code != 0 {
 		return nil, errors.New(result.Msg)
 	}
-	log.Printf("AnqiGetImageAiResponse: %#v", result)
 
 	return &result.Data, nil
 }

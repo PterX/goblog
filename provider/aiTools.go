@@ -1055,6 +1055,65 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		w.DeleteCacheCategories()
 		return fmt.Sprintf("页面 [%d] %s 已成功删除", cat.Id, cat.Title), nil
 	})
+	add(&schema.ToolInfo{
+		Name: "page_update",
+		Desc: "更新单页面内容。可以修改标题、描述、关键词、页面内容等。需要传入页面ID。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":          {Type: schema.Integer, Desc: "页面ID", Required: true},
+			"title":       {Type: schema.String, Desc: "页面标题"},
+			"url_token":   {Type: schema.String, Desc: "URL别名"},
+			"description": {Type: schema.String, Desc: "页面描述"},
+			"keywords":    {Type: schema.String, Desc: "页面关键词"},
+			"content":     {Type: schema.String, Desc: "页面内容，支持HTML格式"},
+			"sort":        {Type: schema.Integer, Desc: "排序值，越小越靠前"},
+			"status":      {Type: schema.Integer, Desc: "状态：1=启用,0=禁用"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args request.Category
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id == 0 {
+			return "错误：页面ID不能为空", nil
+		}
+		cat, err := w.GetCategoryById(args.Id)
+		if err != nil {
+			return "", fmt.Errorf("获取页面失败: %w", err)
+		}
+		if args.Title != "" {
+			cat.Title = args.Title
+		}
+		if args.UrlToken != "" {
+			cat.UrlToken = args.UrlToken
+		}
+		if args.Description != "" {
+			cat.Description = args.Description
+		}
+		if args.Keywords != "" {
+			cat.Keywords = args.Keywords
+		}
+		if args.Content != "" {
+			cat.Content = args.Content
+		}
+		if args.Sort > 0 {
+			cat.Sort = args.Sort
+		}
+		if args.Status > 0 {
+			cat.Status = args.Status
+		}
+		args.UpdateAll = false
+		args.Type = config.CategoryTypePage
+		category, err := w.SaveCategory(&args)
+		if err != nil {
+			return "", fmt.Errorf("更新页面失败: %w", err)
+		}
+		w.DeleteCacheCategories()
+		return fmt.Sprintf("页面 [%d] %s 已更新", category.Id, category.Title), nil
+	})
 
 	// ---- Tag tools ----
 	add(&schema.ToolInfo{
@@ -1312,7 +1371,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 
 	add(&schema.ToolInfo{
 		Name: "template_modify_file",
-		Desc: "修改模板文件的内容。修改后需要通过 template_reload 工具重载模板才能生效。需要传入模板包名、文件相对路径和新的文件内容。",
+		Desc: "修改/添加模板文件的内容。修改后需要通过 template_reload 工具重载模板才能生效。需要传入模板包名、文件相对路径和新的文件内容。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"package": {Type: schema.String, Desc: "模板包名，如 default", Required: true},
 			"path":    {Type: schema.String, Desc: "模板文件相对路径，如 index.html 或 category/list.html", Required: true},
@@ -1400,7 +1459,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 
 	add(&schema.ToolInfo{
 		Name: "template_modify_static",
-		Desc: "修改静态资源文件（CSS/JS/字体等）的内容。修改后立即生效，无需重载。支持 CSS、JS 等文本文件。需要传入模板包名、文件相对路径和新的文件内容。",
+		Desc: "修改/添加静态资源文件（CSS/JS/字体等）的内容。修改后立即生效，无需重载。支持 CSS、JS 等文本文件。需要传入模板包名、文件相对路径和新的文件内容。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"package": {Type: schema.String, Desc: "模板包名，如 default", Required: true},
 			"path":    {Type: schema.String, Desc: "静态文件相对路径，如 css/style.css 或 js/app.js", Required: true},
@@ -1892,6 +1951,43 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		w.DeleteCacheNavs()
 		return fmt.Sprintf("导航 [%d] %s 已成功删除", nav.Id, nav.Title), nil
 	})
+	add(&schema.ToolInfo{
+		Name: "nav_update",
+		Desc: "更新导航菜单。使用 SettingNavForm 逻辑更新导航的全部字段。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":          {Type: schema.Integer, Desc: "导航ID", Required: true},
+			"title":       {Type: schema.String, Desc: "导航显示名称"},
+			"sub_title":   {Type: schema.String, Desc: "副标题"},
+			"description": {Type: schema.String, Desc: "导航描述"},
+			"parent_id":   {Type: schema.Integer, Desc: "父导航ID"},
+			"nav_type":    {Type: schema.Integer, Desc: "导航类型：0=系统页,1=分类,2=外链,3=文档"},
+			"page_id":     {Type: schema.Integer, Desc: "关联的页面ID"},
+			"type_id":     {Type: schema.Integer, Desc: "导航位置类型ID，默认1"},
+			"link":        {Type: schema.String, Desc: "外链URL"},
+			"sort":        {Type: schema.Integer, Desc: "排序值"},
+			"status":      {Type: schema.Integer, Desc: "状态：1=启用,0=禁用"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args request.NavConfig
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id == 0 {
+			return "错误：导航ID不能为空", nil
+		}
+		args.UpdateAll = false
+		nav, err := w.SaveNav(&args)
+		if err != nil {
+			return "", fmt.Errorf("更新导航失败: %w", err)
+		}
+		w.DeleteCacheNavs()
+		w.DeleteCacheIndex()
+		return fmt.Sprintf("导航 [%d] %s 已更新", nav.Id, nav.Title), nil
+	})
 
 	// ---- Friend link tools ----
 	add(&schema.ToolInfo{
@@ -2082,33 +2178,317 @@ SEO信息：
 			index.SeoTitle, index.SeoKeywords, index.SeoDescription), nil
 	})
 
-	// ---- Setting tools ----
+	// ---- System info & Setting tools ----
 	add(&schema.ToolInfo{
-		Name: "setting_system_get",
-		Desc: "读取系统设置值。返回指定键的原始字符串值。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"key": {Type: schema.String, Desc: "设置键名", Required: true},
-		}),
+		Name:        "version",
+		Desc:        "查看当前系统版本号和试用状态。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
-		w := svc.site
-		if w == nil {
-			return "错误：站点未初始化", nil
+		trial := "否"
+		if config.Trial {
+			trial = "是"
 		}
-		var args struct {
-			Key string `json:"key"`
-		}
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Key == "" {
-			return "参数错误：必须提供 key", nil
-		}
-		val := w.GetSettingValue(args.Key)
-		return fmt.Sprintf("设置 %s = %s", args.Key, val), nil
+		return fmt.Sprintf("版本信息：\n版本号: %s\n试用版: %s", config.Version, trial), nil
 	})
 	add(&schema.ToolInfo{
-		Name: "setting_system_set",
-		Desc: "修改系统设置值。注意：修改后立即生效。",
+		Name:        "anqi_info",
+		Desc:        "查看安企CMS授权登录信息，包括是否已登录、会员到期时间等。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		go w.AnqiCheckLogin(false)
+		info := GetAuthInfo()
+		if info == nil {
+			return "暂未获取到授权信息，请稍后重试", nil
+		}
+
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("授权信息：\n"))
+		b.WriteString(fmt.Sprintf("用户名: %s\n", info.UserName))
+		b.WriteString(fmt.Sprintf("授权ID: %d\n", info.AuthId))
+		b.WriteString(fmt.Sprintf("积分余额: %d\n", info.Integral))
+		if info.Valid && info.ExpireTime > 0 {
+			b.WriteString(fmt.Sprintf("会员类型: VIP会员\n"))
+			b.WriteString(fmt.Sprintf("会员到期: %s\n", time.Unix(info.ExpireTime, 0).Format("2006-01-02 15:04:05")))
+		} else {
+			b.WriteString(fmt.Sprintf("会员类型: 普通会员\n"))
+		}
+		b.WriteString(fmt.Sprintf("累计使用Token: %d\n", info.TotalToken))
+		b.WriteString(fmt.Sprintf("未支付Token: %d\n", info.UnPayToken))
+		if info.IsOweFee == 1 {
+			b.WriteString(fmt.Sprintf("是否已欠费: %d\n", "是"))
+		} else {
+			b.WriteString(fmt.Sprintf("是否已欠费: %d\n", "否"))
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "setting_system",
+		Desc:        "查看系统设置，包括站点名称、Logo、备案号、网址、语言等基础配置。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		s := w.System
+		return fmt.Sprintf(`系统设置：
+━━━━━━━━━━━━━━━━━━━━━
+站点名称: %s
+Logo: %s
+网址: %s
+前台网址: %s
+手机网址: %s
+后台域名: %s
+ICP备案: %s
+版权信息: %s
+语言: %s
+站点关闭: %d
+关闭提示: %s
+禁用爬虫: %d
+模板类型：%d
+模板: %s
+━━━━━━━━━━━━━━━━━━━━━`,
+			s.SiteName, s.SiteLogo, s.BaseUrl, s.FrontUrl, s.MobileUrl,
+			s.AdminUrl, s.SiteIcp, s.SiteCopyright, s.Language,
+			s.SiteClose, s.SiteCloseTips, s.BanSpider, s.TemplateType, s.TemplateName), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "setting_system_form",
+		Desc: "更新系统设置。可修改站点名称、Logo、网址、备案号、版权、语言等。只传入要更新的字段。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"key":   {Type: schema.String, Desc: "设置键名", Required: true},
-			"value": {Type: schema.String, Desc: "设置值", Required: true},
+			"site_name":       {Type: schema.String, Desc: "站点名称"},
+			"site_logo":       {Type: schema.String, Desc: "站点Logo URL"},
+			"base_url":        {Type: schema.String, Desc: "站点网址"},
+			"front_url":       {Type: schema.String, Desc: "前台网址"},
+			"mobile_url":      {Type: schema.String, Desc: "手机网址（仅模板类型为电脑+手机时有效）"},
+			"admin_url":       {Type: schema.String, Desc: "后台域名（需http开头）"},
+			"site_icp":        {Type: schema.String, Desc: "ICP备案号"},
+			"site_copyright":  {Type: schema.String, Desc: "版权信息"},
+			"language":        {Type: schema.String, Desc: "语言包（如 zh）"},
+			"site_close":      {Type: schema.Integer, Desc: "站点关闭：1=关闭,0=开启"},
+			"site_close_tips": {Type: schema.String, Desc: "关闭时提示信息"},
+			"ban_spider":      {Type: schema.Integer, Desc: "禁用爬虫：1=禁用,0=允许"},
+			"template_type":   {Type: schema.Integer, Desc: "模板类型：0=自适应,1=代码适配,2=电脑+手机"},
+			"template_name":   {Type: schema.String, Desc: "模板"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args config.SystemConfig
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.AdminUrl != "" && !strings.HasPrefix(args.AdminUrl, "http") {
+			return "错误：后台域名必须以 http 或 https 开头", nil
+		}
+		if args.SiteLogo != "" {
+			args.SiteLogo = strings.TrimPrefix(args.SiteLogo, w.PluginStorage.StorageUrl)
+		}
+		if args.BaseUrl != "" {
+			args.BaseUrl = strings.TrimRight(args.BaseUrl, "/")
+		}
+		if args.FrontUrl != "" {
+			args.FrontUrl = strings.TrimRight(args.FrontUrl, "/")
+		}
+		if args.MobileUrl != "" {
+			w.System.MobileUrl = args.MobileUrl
+		}
+		if args.SiteName != "" {
+			w.System.SiteName = args.SiteName
+		}
+		if args.SiteLogo != "" {
+			w.System.SiteLogo = args.SiteLogo
+		}
+		if args.SiteIcp != "" {
+			w.System.SiteIcp = args.SiteIcp
+		}
+		if args.SiteCopyright != "" {
+			w.System.SiteCopyright = args.SiteCopyright
+		}
+		if args.AdminUrl != "" {
+			w.System.AdminUrl = args.AdminUrl
+		}
+		if args.BaseUrl != "" {
+			w.System.BaseUrl = args.BaseUrl
+		}
+		if args.FrontUrl != "" {
+			w.System.FrontUrl = args.FrontUrl
+		}
+		if args.Language != "" {
+			w.System.Language = args.Language
+		}
+		if args.SiteCloseTips != "" {
+			w.System.SiteCloseTips = args.SiteCloseTips
+		}
+		if args.TemplateName != "" {
+			w.System.TemplateName = args.TemplateName
+		}
+		w.System.TemplateType = args.TemplateType
+		w.System.SiteClose = args.SiteClose
+		w.System.BanSpider = args.BanSpider
+		if err := w.SaveSettingValue(SystemSettingKey, w.System); err != nil {
+			return "", fmt.Errorf("保存系统设置失败: %w", err)
+		}
+		w.DeleteCacheIndex()
+		return "系统设置已更新", nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "setting_contact",
+		Desc:        "查看联系方式设置，包括联系人、电话、地址、邮箱、微信、QQ等。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		c := w.Contact
+		return fmt.Sprintf(`联系方式：
+━━━━━━━━━━━━━━━━━━━━━
+联系人: %s
+电话: %s
+地址: %s
+邮箱: %s
+微信: %s
+QQ: %s
+WhatsApp: %s
+Facebook: %s
+Twitter: %s
+Tiktok: %s
+Pinterest: %s
+Linkedin: %s
+Instagram: %s
+Youtube: %s
+二维码: %s`,
+			c.UserName, c.Cellphone, c.Address, c.Email, c.Wechat, c.QQ,
+			c.WhatsApp, c.Facebook, c.Twitter, c.Tiktok, c.Pinterest,
+			c.Linkedin, c.Instagram, c.Youtube, c.Qrcode), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "setting_contact_form",
+		Desc: "更新联系方式设置。可修改联系人、电话、地址、邮箱、微信、QQ等。只传入要更新的字段。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"user_name": {Type: schema.String, Desc: "联系人"},
+			"cellphone": {Type: schema.String, Desc: "电话"},
+			"address":   {Type: schema.String, Desc: "地址"},
+			"email":     {Type: schema.String, Desc: "邮箱"},
+			"wechat":    {Type: schema.String, Desc: "微信号"},
+			"qq":        {Type: schema.String, Desc: "QQ号"},
+			"whats_app": {Type: schema.String, Desc: "WhatsApp"},
+			"facebook":  {Type: schema.String, Desc: "Facebook"},
+			"twitter":   {Type: schema.String, Desc: "Twitter"},
+			"tiktok":    {Type: schema.String, Desc: "TikTok"},
+			"pinterest": {Type: schema.String, Desc: "Pinterest"},
+			"linkedin":  {Type: schema.String, Desc: "LinkedIn"},
+			"instagram": {Type: schema.String, Desc: "Instagram"},
+			"youtube":   {Type: schema.String, Desc: "Youtube"},
+			"qrcode":    {Type: schema.String, Desc: "二维码图片URL"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args config.ContactConfig
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.UserName != "" {
+			w.Contact.UserName = args.UserName
+		}
+		if args.Cellphone != "" {
+			w.Contact.Cellphone = args.Cellphone
+		}
+		if args.Address != "" {
+			w.Contact.Address = args.Address
+		}
+		if args.Email != "" {
+			w.Contact.Email = args.Email
+		}
+		if args.Wechat != "" {
+			w.Contact.Wechat = args.Wechat
+		}
+		if args.QQ != "" {
+			w.Contact.QQ = args.QQ
+		}
+		if args.WhatsApp != "" {
+			w.Contact.WhatsApp = args.WhatsApp
+		}
+		if args.Facebook != "" {
+			w.Contact.Facebook = args.Facebook
+		}
+		if args.Twitter != "" {
+			w.Contact.Twitter = args.Twitter
+		}
+		if args.Tiktok != "" {
+			w.Contact.Tiktok = args.Tiktok
+		}
+		if args.Pinterest != "" {
+			w.Contact.Pinterest = args.Pinterest
+		}
+		if args.Linkedin != "" {
+			w.Contact.Linkedin = args.Linkedin
+		}
+		if args.Instagram != "" {
+			w.Contact.Instagram = args.Instagram
+		}
+		if args.Youtube != "" {
+			w.Contact.Youtube = args.Youtube
+		}
+		if args.Qrcode != "" {
+			args.Qrcode = strings.TrimPrefix(args.Qrcode, w.PluginStorage.StorageUrl)
+			w.Contact.Qrcode = args.Qrcode
+		}
+		if err := w.SaveSettingValue(ContactSettingKey, w.Contact); err != nil {
+			return "", fmt.Errorf("保存联系方式失败: %w", err)
+		}
+		w.DeleteCacheIndex()
+		return "联系方式已更新", nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "setting_diy_field",
+		Desc:        "查看自定义字段设置，返回所有自定义字段的配置信息。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		fields := w.GetDiyFieldSetting()
+		if len(fields) == 0 {
+			return "暂无自定义字段配置", nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 个自定义字段：\n\n", len(fields)))
+		for _, f := range fields {
+			b.WriteString(fmt.Sprintf("  - %s (%s, %s),默认值: %s。字段值: %s\n", f.FieldName, f.Type, f.Name, strings.ReplaceAll(f.Content, "\n", ","), f.Value))
+
+			b.WriteString(fmt.Sprintf("- %s (%s) 描述: %s\n", f.FieldName, f.Type, f.Name))
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "setting_diy_field_form",
+		Desc: "更新自定义字段配置。需要传入完整的字段列表，会覆盖现有配置。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"fields": {Type: schema.Array, Desc: "自定义字段列表，JSON数组", Required: true,
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.Object,
+					Desc: "字段信息",
+					SubParams: map[string]*schema.ParameterInfo{
+						"field_name": {Type: schema.String, Desc: "字段名", Required: true},
+						"name":       {Type: schema.String, Desc: "字段描述", Required: true},
+						"type":       {Type: schema.String, Desc: "字段类型: text|textarea|select|checkbox|radio|number|texts|editor|image|images|file", Required: true},
+						"content":    {Type: schema.String, Desc: "默认值"},
+						"value":      {Type: schema.String, Desc: "字段值"},
+					},
+				},
+			},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
@@ -2116,16 +2496,265 @@ SEO信息：
 			return "错误：站点未初始化", nil
 		}
 		var args struct {
-			Key   string `json:"key"`
-			Value string `json:"value"`
+			Fields []config.CustomField `json:"fields"`
 		}
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Key == "" {
-			return "参数错误：必须提供 key 和 value", nil
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
-		if err := w.SaveSettingValue(args.Key, args.Value); err != nil {
-			return fmt.Sprintf("保存失败: %s", err.Error()), nil
+		for i, field := range args.Fields {
+			if field.Name == "" {
+				return fmt.Sprintf("错误：字段[%d]名称不能为空", i), nil
+			}
+			if field.Type == "" {
+				return fmt.Sprintf("错误：字段[%d]类型不能为空", i), nil
+			}
 		}
-		return fmt.Sprintf("设置 %s 已更新为 %s", args.Key, args.Value), nil
+		if err := w.SaveSettingValue(DiyFieldsKey, args.Fields); err != nil {
+			return "", fmt.Errorf("保存自定义字段失败: %w", err)
+		}
+		w.Cache.Delete(DiyFieldsKey)
+		w.DeleteCacheIndex()
+		return fmt.Sprintf("自定义字段已更新，共 %d 个字段", len(args.Fields)), nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "setting_index",
+		Desc:        "查看首页TDK设置（SEO标题、关键词、描述）。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		idx := w.Index
+		return fmt.Sprintf(`首页TDK设置：
+━━━━━━━━━━━━━━━━━━━━━
+SEO标题: %s
+SEO关键词: %s
+SEO描述: %s
+标题分隔符: %s`,
+			idx.SeoTitle, idx.SeoKeywords, idx.SeoDescription, idx.Sep), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "setting_index_form",
+		Desc: "更新首页TDK设置（SEO标题、关键词、描述）。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"seo_title":       {Type: schema.String, Desc: "SEO标题"},
+			"seo_keywords":    {Type: schema.String, Desc: "SEO关键词，多个用逗号分隔"},
+			"seo_description": {Type: schema.String, Desc: "SEO描述"},
+			"sep":             {Type: schema.String, Desc: "标题分隔符"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args config.IndexConfig
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.SeoTitle != "" {
+			w.Index.SeoTitle = args.SeoTitle
+		}
+		if args.SeoKeywords != "" {
+			w.Index.SeoKeywords = args.SeoKeywords
+		}
+		if args.SeoDescription != "" {
+			w.Index.SeoDescription = args.SeoDescription
+		}
+		if args.Sep != "" {
+			w.Index.Sep = args.Sep
+		}
+		if err := w.SaveSettingValue(IndexSettingKey, w.Index); err != nil {
+			return "", fmt.Errorf("保存首页TDK失败: %w", err)
+		}
+		w.DeleteCacheIndex()
+		return "首页TDK已更新", nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "setting_content",
+		Desc:        "查看内容设置，包括远程下载、过滤外链、URL模式、缩略图、编辑器等。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		c := w.Content
+		return fmt.Sprintf(`内容设置：
+━━━━━━━━━━━━━━━━━━━━━
+远程下载: %d
+过滤外链: %d
+自定义URL格式: %d
+使用Webp: %d
+转换Gif: %d
+图片质量: %d
+缩放图片: %d
+缩放宽度: %d
+裁剪缩略图模式: %d
+缩略图宽: %d
+缩略图高: %d
+默认缩略图来源：%d
+默认缩略图列表：%v
+默认缩略图分类：%d
+启用文档多分类: %d
+启用排序: %d
+编辑器类型: %s
+最大页码: %d
+最大条数: %d`,
+			c.RemoteDownload, c.FilterOutlink, c.UrlTokenType,
+			c.UseWebp, c.ConvertGif, c.Quality, c.ResizeImage,
+			c.ResizeWidth, c.ThumbCrop, c.ThumbWidth, c.ThumbHeight,
+			c.DefaultThumbType, c.DefaultThumbs, c.ThumbCategoryId,
+			c.MultiCategory, c.UseSort, c.Editor, c.MaxPage, c.MaxLimit), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "setting_content_form",
+		Desc: "更新内容设置。需传入所有参数，不更改的参数请设置为原值。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"remote_download":    {Type: schema.Integer, Desc: "远程下载：1=开启,0=关闭"},
+			"filter_outlink":     {Type: schema.Integer, Desc: "过滤外链：1=开启,0=关闭"},
+			"url_token_type":     {Type: schema.Integer, Desc: "自定义URL格式：0=全拼音,1=首字母"},
+			"use_webp":           {Type: schema.Integer, Desc: "使用Webp：1=启用,0=禁用"},
+			"convert_gif":        {Type: schema.Integer, Desc: "转换GIF：1=启用,0=禁用"},
+			"quality":            {Type: schema.Integer, Desc: "图片质量（1-100）"},
+			"resize_image":       {Type: schema.Integer, Desc: "图片缩放：1=启用,0=禁用"},
+			"resize_width":       {Type: schema.Integer, Desc: "缩放宽度，默认800"},
+			"thumb_crop":         {Type: schema.Integer, Desc: "缩略图裁剪模式：0=按最长边等比缩放,1=按最长边补白,2 =按最短边裁剪"},
+			"thumb_width":        {Type: schema.Integer, Desc: "缩略图宽度"},
+			"thumb_height":       {Type: schema.Integer, Desc: "缩略图高度"},
+			"default_thumb_type": {Type: schema.String, Desc: "默认缩略图来源：0=图片列表,3=图片库分类ID"},
+			"default_thumbs":     {Type: schema.Array, Desc: "图片列表"},
+			"thumb_category_id":  {Type: schema.Integer, Desc: "图片库分类ID"},
+			"multi_category":     {Type: schema.Integer, Desc: "启用文档多分类：1=启用,0=禁用"},
+			"use_sort":           {Type: schema.Integer, Desc: "启用文档排序：1=启用,0=禁用"},
+			"editor":             {Type: schema.String, Desc: "编辑器类型：default 或 markdown"},
+			"max_page":           {Type: schema.Integer, Desc: "最大显示页码"},
+			"max_limit":          {Type: schema.Integer, Desc: "最大显示条数"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args config.ContentConfig
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		w.Content.RemoteDownload = args.RemoteDownload
+		w.Content.FilterOutlink = args.FilterOutlink
+		w.Content.UrlTokenType = args.UrlTokenType
+		w.Content.UseWebp = args.UseWebp
+		w.Content.ConvertGif = args.ConvertGif
+		w.Content.Quality = args.Quality
+		w.Content.ResizeImage = args.ResizeImage
+		w.Content.ResizeWidth = args.ResizeWidth
+		w.Content.ThumbCrop = args.ThumbCrop
+		w.Content.ThumbWidth = args.ThumbWidth
+		w.Content.ThumbHeight = args.ThumbHeight
+		w.Content.DefaultThumbType = args.DefaultThumbType
+		w.Content.DefaultThumbs = args.DefaultThumbs
+		w.Content.ThumbCategoryId = args.ThumbCategoryId
+		w.Content.MultiCategory = args.MultiCategory
+		w.Content.UseSort = args.UseSort
+		if args.Editor != "" {
+			w.Content.Editor = args.Editor
+		}
+		if args.MaxPage > 0 {
+			w.Content.MaxPage = args.MaxPage
+		}
+		if args.MaxLimit > 0 {
+			w.Content.MaxLimit = args.MaxLimit
+		}
+		if err := w.SaveSettingValue(ContentSettingKey, w.Content); err != nil {
+			return "", fmt.Errorf("保存内容设置失败: %w", err)
+		}
+		w.DeleteCacheIndex()
+		return "内容设置已更新", nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "setting_safe",
+		Desc:        "查看内容安全设置，包括验证码、频率限制、内容过滤、IP黑名单等。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		s := w.Safe
+		return fmt.Sprintf(`安全设置：
+━━━━━━━━━━━━━━━━━━━━━
+验证码: %d
+同IP每日提交限制: %d
+提交留言内容至少字数: %d
+间隔限制: %d
+禁止的内容关键词: %s
+IP黑名单: %s
+UA黑名单: %s
+API开放: %d
+API发布: %d
+后台验证码: %d`,
+			s.Captcha, s.DailyLimit, s.ContentLimit, s.IntervalLimit,
+			s.ContentForbidden, s.IPForbidden, s.UAForbidden,
+			s.APIOpen, s.APIPublish, s.AdminCaptchaOff), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "setting_safe_form",
+		Desc: "更新内容安全设置。值为数字的字段必传，字符串字段为空则不更新。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"captcha":           {Type: schema.Integer, Desc: "验证码：1=开启,0=关闭"},
+			"daily_limit":       {Type: schema.Integer, Desc: "同IP每日提交限制，0=不限制"},
+			"content_limit":     {Type: schema.Integer, Desc: "提交留言内容至少字数，0=不限制"},
+			"interval_limit":    {Type: schema.Integer, Desc: "提交留言间隔(秒)，0=不限制"},
+			"content_forbidden": {Type: schema.String, Desc: "禁止的内容关键词，一行一个"},
+			"ip_forbidden":      {Type: schema.String, Desc: "禁止的IP，一行一个"},
+			"ua_forbidden":      {Type: schema.String, Desc: "禁止的User-Agent，一行一个"},
+			"api_open":          {Type: schema.Integer, Desc: "API开放：1=开启,0=关闭"},
+			"api_publish":       {Type: schema.Integer, Desc: "API发布：1=允许,0=禁止"},
+			"admin_captcha_off": {Type: schema.Integer, Desc: "后台验证码：1=关闭,0=开启"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args config.SafeConfig
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		w.Safe.Captcha = args.Captcha
+		w.Safe.DailyLimit = args.DailyLimit
+		w.Safe.ContentLimit = args.ContentLimit
+		w.Safe.IntervalLimit = args.IntervalLimit
+		if args.ContentForbidden != "" {
+			w.Safe.ContentForbidden = args.ContentForbidden
+		}
+		if args.IPForbidden != "" {
+			w.Safe.IPForbidden = args.IPForbidden
+		}
+		if args.UAForbidden != "" {
+			w.Safe.UAForbidden = args.UAForbidden
+		}
+		w.Safe.APIOpen = args.APIOpen
+		w.Safe.APIPublish = args.APIPublish
+		w.Safe.AdminCaptchaOff = args.AdminCaptchaOff
+		if err := w.SaveSettingValue(SafeSettingKey, w.Safe); err != nil {
+			return "", fmt.Errorf("保存安全设置失败: %w", err)
+		}
+		w.DeleteCacheIndex()
+		return "安全设置已更新", nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "setting_migrate_db",
+		Desc:        "更新数据库表结构，自动同步模型字段变更到数据库。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		if svc.site == nil {
+			return "错误：站点未初始化", nil
+		}
+		if err := AutoMigrateDB(svc.site.DB, true); err != nil {
+			return "", fmt.Errorf("更新数据库表结构失败: %w", err)
+		}
+		return "数据库表结构已更新", nil
 	})
 
 	// ---- Sitemap & Push tools ----
@@ -2432,6 +3061,86 @@ SEO信息：
 		}
 		return b.String(), nil
 	})
+	add(&schema.ToolInfo{
+		Name: "anchor_create",
+		Desc: "添加或更新锚文本链接。如果指定ID则更新，否则创建。标题和链接必填。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":     {Type: schema.Integer, Desc: "锚文本ID，留空表示创建"},
+			"title":  {Type: schema.String, Desc: "锚文本关键词", Required: true},
+			"link":   {Type: schema.String, Desc: "锚文本链接地址", Required: true},
+			"weight": {Type: schema.Integer, Desc: "权重值，越大越优先替换"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args request.PluginAnchor
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Title == "" || args.Link == "" {
+			return "参数错误：必须提供 title 和 link", nil
+		}
+		frontUrl := w.System.BaseUrl
+		if w.System.FrontUrl != "" {
+			frontUrl = w.System.FrontUrl
+		}
+		args.Link = strings.TrimPrefix(args.Link, frontUrl)
+
+		var anchor *model.Anchor
+		var err error
+		if args.Id > 0 {
+			anchor, err = w.GetAnchorById(args.Id)
+			if err != nil {
+				return "", fmt.Errorf("获取锚文本失败: %w", err)
+			}
+		} else {
+			anchor, _ = w.GetAnchorByTitle(args.Title)
+			if anchor == nil {
+				anchor = &model.Anchor{Status: 1}
+			}
+		}
+		anchor.Title = args.Title
+		anchor.Link = args.Link
+		anchor.Weight = args.Weight
+		if err := anchor.Save(w.DB); err != nil {
+			return "", fmt.Errorf("保存锚文本失败: %w", err)
+		}
+		return fmt.Sprintf("锚文本 [%d] %s -> %s 已保存", anchor.Id, anchor.Title, anchor.Link), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "anchor_delete",
+		Desc: "删除锚文本链接。可以通过ID或ID列表删除。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":  {Type: schema.Integer, Desc: "锚文本ID"},
+			"ids": {Type: schema.Array, Desc: "锚文本ID列表，JSON数组如 [1,2,3]"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args request.PluginAnchorDelete
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || (args.Id == 0 && len(args.Ids) == 0) {
+			return "参数错误：必须提供 id 或 ids", nil
+		}
+		if args.Id > 0 {
+			anchor, err := w.GetAnchorById(args.Id)
+			if err != nil {
+				return "", fmt.Errorf("获取锚文本失败: %w", err)
+			}
+			if err := w.DeleteAnchor(anchor); err != nil {
+				return "", fmt.Errorf("删除锚文本失败: %w", err)
+			}
+		} else if len(args.Ids) > 0 {
+			for _, id := range args.Ids {
+				anchor, err := w.GetAnchorById(id)
+				if err != nil {
+					continue
+				}
+				_ = w.DeleteAnchor(anchor)
+			}
+		}
+		return "锚文本已删除", nil
+	})
 
 	// ---- Redirect tools ----
 	add(&schema.ToolInfo{
@@ -2682,7 +3391,7 @@ SEO信息：
 		return "robots.txt 已更新", nil
 	})
 	add(&schema.ToolInfo{
-		Name:        "plugin_rewrite_get",
+		Name:        "rewrite_get",
 		Desc:        "查看当前的 URL 重写（伪静态）配置。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
@@ -2695,16 +3404,45 @@ SEO信息：
 		}
 		modeStr := "未知"
 		switch w.PluginRewrite.Mode {
-		case 1:
-			modeStr = "模式1（通用模式）"
-		case 2:
-			modeStr = "模式2（命名模式2）"
-		case 3:
-			modeStr = "模式3（命名模式3）"
-		case 4:
-			modeStr = "模式4（正则模式）"
+		case config.RewriteNumberMode:
+			modeStr = "数字模式"
+		case config.RewriteStringMode1:
+			modeStr = "命名模式1"
+		case config.RewriteStringMode2:
+			modeStr = "命名模式2"
+		case config.RewriteStringMode3:
+			modeStr = "命名模式3"
+		case config.RewritePatternMode:
+			modeStr = "正则模式"
 		}
 		return fmt.Sprintf("URL 重写配置：\n模式: %s (%d)\n规则: %s", modeStr, w.PluginRewrite.Mode, w.PluginRewrite.Patten), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "rewrite_form",
+		Desc: "更新 URL 重写（伪静态）配置。可以修改模式和匹配规则。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"mode":   {Type: schema.Integer, Desc: "模式：0=数字模式,1=命名模式1,2=命名模式2,3=命名模式3,4=正则模式", Required: true},
+			"patten": {Type: schema.String, Desc: "URL匹配规则", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args config.PluginRewriteConfig
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if w.PluginRewrite.Mode != args.Mode || w.PluginRewrite.Patten != args.Patten {
+			w.PluginRewrite.Mode = args.Mode
+			w.PluginRewrite.Patten = args.Patten
+			if err := w.SaveSettingValue(RewriteSettingKey, w.PluginRewrite); err != nil {
+				return "", fmt.Errorf("保存重写配置失败: %w", err)
+			}
+			w.ParsePattern(true)
+			w.RemoveHtmlCache()
+		}
+		return fmt.Sprintf("URL 重写配置已更新：模式=%d, 规则=%s", args.Mode, args.Patten), nil
 	})
 	add(&schema.ToolInfo{
 		Name:        "plugin_htmlcache_build",
@@ -2796,6 +3534,155 @@ SEO信息：
 			b.WriteString(fmt.Sprintf("#%d | %s (%s) | %s | 余额:%d\n", u.Id, u.UserName, group, status, u.Balance))
 		}
 		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "user_get",
+		Desc: "获取单个用户的详细信息。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "用户ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args ArgId
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		users, _ := w.GetUserList(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("id = ?", args.Id)
+		}, 1, 1)
+		if len(users) == 0 {
+			return "未找到该用户", nil
+		}
+		u := users[0]
+		status := "正常"
+		if u.Status == 0 {
+			status = "待审核"
+		} else if u.Status == -1 {
+			status = "禁用"
+		}
+		group := ""
+		if u.Group != nil {
+			group = u.Group.Title
+		}
+		return fmt.Sprintf("用户信息：\nID: %d\n用户名: %s\n分组: %s\n状态: %s\n余额: %d\n手机: %s\n邮箱: %s",
+			u.Id, u.UserName, group, status, u.Balance, u.Phone, u.Email), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "user_create",
+		Desc: "添加新用户。必填字段：user_name。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"user_name": {Type: schema.String, Desc: "用户名", Required: true},
+			"password":  {Type: schema.String, Desc: "密码"},
+			"phone":     {Type: schema.String, Desc: "手机号"},
+			"email":     {Type: schema.String, Desc: "邮箱"},
+			"group_id":  {Type: schema.Integer, Desc: "用户组ID"},
+			"status":    {Type: schema.Integer, Desc: "状态：0=待审核,1=正常,-1=禁用"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			UserName string `json:"user_name"`
+			Password string `json:"password"`
+			Phone    string `json:"phone"`
+			Email    string `json:"email"`
+			GroupId  uint   `json:"group_id"`
+			Status   int    `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.UserName == "" {
+			return "参数错误：必须提供 user_name", nil
+		}
+		req := request.UserRequest{
+			UserName: args.UserName,
+			Password: args.Password,
+			Phone:    args.Phone,
+			Email:    args.Email,
+			GroupId:  args.GroupId,
+			Status:   args.Status,
+		}
+		user, err := w.SaveUserInfo(&req)
+		if err != nil {
+			return "", fmt.Errorf("创建用户失败: %w", err)
+		}
+		return fmt.Sprintf("用户创建成功！ID: %d, 用户名: %s", user.Id, user.UserName), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "user_update",
+		Desc: "更新用户信息。需要传入用户ID，至少传入一个要更新的字段。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":        {Type: schema.Integer, Desc: "用户ID", Required: true},
+			"user_name": {Type: schema.String, Desc: "用户名"},
+			"password":  {Type: schema.String, Desc: "密码"},
+			"phone":     {Type: schema.String, Desc: "手机号"},
+			"email":     {Type: schema.String, Desc: "邮箱"},
+			"group_id":  {Type: schema.Integer, Desc: "用户组ID"},
+			"status":    {Type: schema.Integer, Desc: "状态：0=待审核,1=正常,-1=禁用"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Id       uint   `json:"id"`
+			UserName string `json:"user_name"`
+			Password string `json:"password"`
+			Phone    string `json:"phone"`
+			Email    string `json:"email"`
+			GroupId  uint   `json:"group_id"`
+			Status   int    `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Id == 0 {
+			return "参数错误：必须提供 id", nil
+		}
+		// 获取已有用户
+		users, _ := w.GetUserList(func(tx *gorm.DB) *gorm.DB {
+			return tx.Where("id = ?", args.Id)
+		}, 1, 1)
+		if len(users) == 0 {
+			return "未找到该用户", nil
+		}
+		req := request.UserRequest{
+			Id:       args.Id,
+			UserName: args.UserName,
+			Password: args.Password,
+			Phone:    args.Phone,
+			Email:    args.Email,
+			GroupId:  args.GroupId,
+			Status:   args.Status,
+		}
+		user, err := w.SaveUserInfo(&req)
+		if err != nil {
+			return "", fmt.Errorf("更新用户失败: %w", err)
+		}
+		return fmt.Sprintf("用户 [%d] %s 已更新", user.Id, user.UserName), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "user_delete",
+		Desc: "删除用户。需要传入用户ID。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "用户ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil {
+			return "错误：站点未初始化", nil
+		}
+		var args struct {
+			Id uint `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil || args.Id == 0 {
+			return "参数错误：必须提供 id", nil
+		}
+		if err := w.DeleteUserInfo(args.Id); err != nil {
+			return "", fmt.Errorf("删除用户失败: %w", err)
+		}
+		return fmt.Sprintf("用户 #%d 已删除", args.Id), nil
 	})
 	add(&schema.ToolInfo{
 		Name: "order_list",

@@ -24,6 +24,7 @@ type Archive struct {
 	Description  string         `json:"description" gorm:"column:description;type:varchar(1000) not null;default:''"`
 	ModuleId     uint           `json:"module_id" gorm:"column:module_id;type:int(10) unsigned not null;default:1;index:idx_module_created_time,priority:1"`
 	CategoryId   uint           `json:"category_id" gorm:"column:category_id;type:int(10) unsigned not null;default:0;index:idx_category_created_time,priority:1"`
+	PlaceId      uint           `json:"place_id" gorm:"column:place_id;type:int(10) not null;default:0;index"` // 绑定的地区ID
 	Views        uint           `json:"views" gorm:"column:views;type:int(10) unsigned not null;default:0;index:idx_views"`
 	CommentCount uint           `json:"comment_count" gorm:"column:comment_count;type:int(10) unsigned not null;default:0"`
 	Images       pq.StringArray `json:"images" gorm:"column:images;type:text default null"`

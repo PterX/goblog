@@ -140,6 +140,7 @@ func manageRoute(app *iris.Application) {
 		{
 			attachment.Get("/list", manageController.AttachmentList)
 			attachment.Post("/upload", manageController.AttachmentUpload)
+			attachment.Post("/addurl", manageController.AttachmentAddRemoteUrl)
 			attachment.Post("/delete", manageController.AttachmentDelete)
 			attachment.Post("/edit", manageController.AttachmentEdit)
 			attachment.Post("/scan", manageController.AttachmentScanUploads)
@@ -587,6 +588,15 @@ func manageRoute(app *iris.Application) {
 				llms.Post("/build", manageController.PluginLLMsBuild)
 				llms.Get("/setting", manageController.PluginGetLLMsSetting)
 				llms.Post("/setting", manageController.PluginSaveLLMsSetting)
+			}
+			place := plugin.Party("/place")
+			{
+				place.Get("/setting", manageController.PluginGetPlaceSetting)
+				place.Post("/setting", manageController.PluginSavePlaceSetting)
+				place.Get("/list", manageController.PluginPlaceList)
+				place.Get("/detail", manageController.PlaceDetail)
+				place.Post("/detail", manageController.PlaceDetailForm)
+				place.Post("/delete", manageController.PlaceDelete)
 			}
 		}
 	}

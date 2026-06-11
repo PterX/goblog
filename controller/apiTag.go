@@ -120,6 +120,7 @@ func ApiArchiveList(ctx iris.Context) {
 	currentSite := provider.CurrentSite(ctx)
 	archiveId := ctx.URLParamInt64Default("id", 0)
 	parentId := ctx.URLParamInt64Default("parentId", 0)
+	placeId := ctx.URLParamInt64Default("placeId", 0)
 	moduleId := uint(ctx.URLParamIntDefault("moduleId", 0))
 	authorId := uint(ctx.URLParamIntDefault("authorId", 0))
 	userId := uint(ctx.URLParamIntDefault("userId", 0))
@@ -239,6 +240,7 @@ func ApiArchiveList(ctx iris.Context) {
 		Id:                 archiveId,
 		Render:             render,
 		ParentId:           int64(parentId),
+		PlaceId:            int64(placeId),
 		CategoryIds:        categoryIds,
 		ExcludeCategoryIds: excludeCategoryIds,
 		ModuleId:           int64(moduleId),
@@ -651,7 +653,11 @@ func ApiPageDetail(ctx iris.Context) {
 	category.Thumb = category.GetThumb(currentSite.PluginStorage.StorageUrl, currentSite.GetDefaultThumb(int(category.Id)))
 	// convert markdown to html
 	if render {
-		category.Content = library.MarkdownToHTML(category.Content, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+		frontUrl := currentSite.System.BaseUrl
+		if currentSite.System.FrontUrl != "" {
+			frontUrl = currentSite.System.FrontUrl
+		}
+		category.Content = library.MarkdownToHTML(category.Content, frontUrl, currentSite.Content.FilterOutlink)
 	}
 	ctx.JSON(iris.Map{
 		"code": config.StatusOK,
@@ -726,7 +732,10 @@ func ApiTagDetail(ctx iris.Context) {
 		})
 		return
 	}
-
+	frontUrl := currentSite.System.BaseUrl
+	if currentSite.System.FrontUrl != "" {
+		frontUrl = currentSite.System.FrontUrl
+	}
 	if tagDetail != nil {
 		tagDetail.Link = currentSite.GetUrl("tag", tagDetail, 0)
 		tagDetail.GetThumb(currentSite.PluginStorage.StorageUrl, currentSite.GetDefaultThumb(int(tagDetail.Id)))
@@ -735,7 +744,7 @@ func ApiTagDetail(ctx iris.Context) {
 			tagDetail.Content = tagContent.Content
 			// convert markdown to html
 			if render {
-				tagDetail.Content = library.MarkdownToHTML(tagDetail.Content, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+				tagDetail.Content = library.MarkdownToHTML(tagDetail.Content, frontUrl, currentSite.Content.FilterOutlink)
 			}
 			tagDetail.Extra = tagContent.Extra
 			if tagDetail.Extra != nil {
@@ -754,7 +763,7 @@ func ApiTagDetail(ctx iris.Context) {
 							value, ok2 := tagDetail.Extra[field.FieldName].(string)
 							if ok2 {
 								if field.Type == config.CustomFieldTypeEditor && render {
-									value = library.MarkdownToHTML(value, currentSite.System.BaseUrl, currentSite.Content.FilterOutlink)
+									value = library.MarkdownToHTML(value, frontUrl, currentSite.Content.FilterOutlink)
 								}
 								tagDetail.Extra[field.FieldName] = currentSite.ReplaceContentUrl(value, true)
 							}
@@ -965,6 +974,91 @@ func ApiTagList(ctx iris.Context) {
 		"msg":   "",
 		"total": total,
 		"data":  tagList,
+	})
+}
+
+func ApiPlaceDetail(ctx iris.Context) {
+	currentSite := provider.CurrentSite(ctx)
+	if currentSite.PluginPlace.Open == false {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("NotOpen"),
+		})
+		return
+	}
+	id := uint(ctx.URLParamIntDefault("id", 0))
+	filename := ctx.URLParam("filename")
+	// 只有content字段有效
+	render := currentSite.Content.Editor == "markdown"
+	if ctx.URLParamExists("render") {
+		render, _ = ctx.URLParamBool("render")
+	}
+
+	req := &request.ApiPlaceRequest{
+		Id:       int64(id),
+		UrlToken: filename,
+		Render:   render,
+	}
+
+	place, err := currentSite.ApiGetPlace(req)
+	if err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "",
+		"data": place,
+	})
+}
+
+func ApiPlaceList(ctx iris.Context) {
+	currentSite := provider.CurrentSite(ctx)
+	if currentSite.PluginPlace.Open == false {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("NotOpen"),
+		})
+		return
+	}
+	parentId := uint(ctx.URLParamIntDefault("parentId", 0))
+	all := ctx.URLParamBoolDefault("all", false)
+	limit := 0
+	offset := 0
+	limitTmp := ctx.URLParam("limit")
+	if limitTmp != "" {
+		limitArgs := strings.Split(limitTmp, ",")
+		if len(limitArgs) == 2 {
+			offset, _ = strconv.Atoi(limitArgs[0])
+			limit, _ = strconv.Atoi(limitArgs[1])
+		} else if len(limitArgs) == 1 {
+			limit, _ = strconv.Atoi(limitArgs[0])
+		}
+		if limit > currentSite.Content.MaxLimit {
+			limit = currentSite.Content.MaxLimit
+		}
+		if limit < 1 {
+			limit = 1
+		}
+	}
+
+	req := &request.ApiPlaceListRequest{
+		ParentId: int64(parentId),
+		All:      all,
+		Limit:    limit,
+		Offset:   offset,
+	}
+
+	places, _ := currentSite.ApiGetPlaces(req)
+
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "",
+		"data": places,
 	})
 }
 
@@ -1245,19 +1339,7 @@ func ApiGuestbookForm(ctx iris.Context) {
 		if isChecked {
 			currentSite.DB.Model(guestbook).UpdateColumn("status", spamStatus)
 		}
-		if spamStatus == 1 {
-			// 1 是正常，可以发邮件
-			currentSite.SendGuestbookToMail(guestbook)
-			if currentSite.ParentId > 0 {
-				mainSite := currentSite.GetMainWebsite()
-				parentGuestbook := *guestbook
-				parentGuestbook.Id = 0
-				parentGuestbook.Status = spamStatus
-				parentGuestbook.SiteId = currentSite.Id
-				_ = mainSite.DB.Save(&parentGuestbook)
-				mainSite.SendGuestbookToMail(&parentGuestbook)
-			}
-		}
+		currentSite.ProcessGuestbook(guestbook, spamStatus)
 	}()
 
 	msg := currentSite.PluginGuestbook.ReturnMessage

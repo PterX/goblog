@@ -99,6 +99,9 @@ func (w *Website) GetMultiLangSites(mainId uint, all bool) []config.MultiLangSit
 	tmpSite.LanguageName = library.GetLanguageName(mainSite.System.Language)
 	tmpSite.Language = mainSite.System.Language
 	tmpSite.BaseUrl = mainSite.System.BaseUrl
+	if mainSite.System.FrontUrl != "" {
+		tmpSite.BaseUrl = mainSite.System.FrontUrl
+	}
 	// end
 
 	multiLangSites = append(multiLangSites, tmpSite)
@@ -137,6 +140,9 @@ func (w *Website) GetMultiLangSites(mainId uint, all bool) []config.MultiLangSit
 					subSite.LanguageName = library.GetLanguageName(allSites[i].System.Language)
 					subSite.Language = allSites[i].System.Language
 					subSite.BaseUrl = allSites[i].System.BaseUrl
+					if allSites[i].System.FrontUrl != "" {
+						subSite.BaseUrl = allSites[i].System.FrontUrl
+					}
 				}
 				multiLangSites = append(multiLangSites, subSite)
 			}
@@ -160,7 +166,11 @@ func (w *Website) GetMultiLangSites(mainId uint, all bool) []config.MultiLangSit
 			if mainSite.MultiLanguage.Type == config.MultiLangTypeDomain {
 				link = subSite.BaseUrl + "/"
 			} else if mainSite.MultiLanguage.Type == config.MultiLangTypeDirectory {
-				link = mainSite.System.BaseUrl + "/" + subSite.Language + "/"
+				frontUrl := mainSite.System.BaseUrl
+				if mainSite.System.FrontUrl != "" {
+					frontUrl = mainSite.System.FrontUrl
+				}
+				link = frontUrl + "/" + subSite.Language + "/"
 			} else if mainSite.MultiLanguage.Type == config.MultiLangTypeSame {
 				link += mainSite.GetUrl("", nil, 0) + "?lang=" + subSite.Language
 			}
@@ -300,7 +310,11 @@ func (w *Website) SaveMultiLangSite(req *request.PluginMultiLangSiteRequest) err
 		}
 		var baseUrl string
 		if w.MultiLanguage.Type == config.MultiLangTypeDirectory {
-			baseUrl = w.System.BaseUrl + "/" + req.Language
+			frontUrl := w.System.BaseUrl
+			if w.System.FrontUrl != "" {
+				frontUrl = w.System.FrontUrl
+			}
+			baseUrl = frontUrl + "/" + req.Language
 		} else if w.MultiLanguage.Type == config.MultiLangTypeSame {
 			baseUrl = w.System.BaseUrl
 		}

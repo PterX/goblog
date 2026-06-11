@@ -1021,7 +1021,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 
 	add(&schema.ToolInfo{
 		Name: "web_search",
-		Desc: "搜索互联网获取最新信息。使用 DuckDuckGo 搜索引擎，不需要 API Key。",
+		Desc: "搜索互联网获取最新信息。可访问外网时使用 DuckDuckGo，否则回退使用 Bing 搜索。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"query": {Type: schema.String, Desc: "搜索关键词", Required: true},
 		}),
@@ -1034,97 +1034,10 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			return "错误：搜索关键词不能为空", nil
 		}
 
-		searchURL := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(args.Query))
-		client := &http.Client{Timeout: 15 * time.Second}
-		req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-		if err != nil {
-			return "", fmt.Errorf("创建请求失败: %w", err)
+		if config.GoogleValid {
+			return searchDuckDuckGo(ctx, args.Query)
 		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AnQiCMS AI Bot)")
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return "", fmt.Errorf("搜索请求失败: %w", err)
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
-		if err != nil {
-			return "", fmt.Errorf("读取响应失败: %w", err)
-		}
-
-		doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
-		if err != nil {
-			return "", fmt.Errorf("解析搜索结果失败: %w", err)
-		}
-
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("搜索结果: %s\n\n", args.Query))
-
-		count := 0
-		doc.Find(".result").Each(func(i int, s *goquery.Selection) {
-			if count >= 10 {
-				return
-			}
-			title := strings.TrimSpace(s.Find(".result__title a").Text())
-			link, _ := s.Find(".result__url").Attr("href")
-			snippet := strings.TrimSpace(s.Find(".result__snippet").Text())
-
-			if title == "" {
-				// Alternative selectors
-				title = strings.TrimSpace(s.Find("h2 a").Text())
-				link, _ = s.Find("h2 a").Attr("href")
-				snippet = strings.TrimSpace(s.Find(".result__snippet, .snippet").Text())
-			}
-			// Clean up DuckDuckGo redirect URL
-			if strings.Contains(link, "//duckduckgo.com/l/?uddg=") {
-				u, err := url.Parse(link)
-				if err == nil {
-					if decoded := u.Query().Get("uddg"); decoded != "" {
-						link = decoded
-					}
-				}
-			}
-			if title != "" {
-				b.WriteString(fmt.Sprintf("%d. %s\n", count+1, title))
-				if link != "" {
-					b.WriteString(fmt.Sprintf("   %s\n", link))
-				}
-				if snippet != "" {
-					b.WriteString(fmt.Sprintf("   %s\n", snippet))
-				}
-				b.WriteString("\n")
-				count++
-			}
-		})
-
-		if count == 0 {
-			// Fallback: try simpler selectors
-			doc.Find(".results_links").Each(func(i int, s *goquery.Selection) {
-				if count >= 10 {
-					return
-				}
-				title := strings.TrimSpace(s.Find(".results_links_title a").Text())
-				link, _ := s.Find(".results_links_title a").Attr("href")
-				snippet := strings.TrimSpace(s.Find(".results_links_snippet").Text())
-				if title != "" {
-					b.WriteString(fmt.Sprintf("%d. %s\n", count+1, title))
-					if link != "" {
-						b.WriteString(fmt.Sprintf("   %s\n", link))
-					}
-					if snippet != "" {
-						b.WriteString(fmt.Sprintf("   %s\n", snippet))
-					}
-					b.WriteString("\n")
-					count++
-				}
-			})
-		}
-
-		if count == 0 {
-			return fmt.Sprintf("未找到关于 \"%s\" 的搜索结果，请尝试其他关键词", args.Query), nil
-		}
-		return b.String(), nil
+		return searchBing(ctx, args.Query)
 	})
 
 	// ================================================================
@@ -1835,6 +1748,158 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 	})
 
 	return tools, handlers
+}
+
+// searchDuckDuckGo 使用 DuckDuckGo 搜索
+func searchDuckDuckGo(ctx context.Context, query string) (string, error) {
+	searchURL := fmt.Sprintf("https://html.duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AnQiCMS AI Bot)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("搜索请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("解析搜索结果失败: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("搜索结果: %s\n\n", query))
+
+	count := 0
+	doc.Find(".result").Each(func(i int, s *goquery.Selection) {
+		if count >= 10 {
+			return
+		}
+		title := strings.TrimSpace(s.Find(".result__title a").Text())
+		link, _ := s.Find(".result__url").Attr("href")
+		snippet := strings.TrimSpace(s.Find(".result__snippet").Text())
+
+		if title == "" {
+			title = strings.TrimSpace(s.Find("h2 a").Text())
+			link, _ = s.Find("h2 a").Attr("href")
+			snippet = strings.TrimSpace(s.Find(".result__snippet, .snippet").Text())
+		}
+		if strings.Contains(link, "//duckduckgo.com/l/?uddg=") {
+			u, err := url.Parse(link)
+			if err == nil {
+				if decoded := u.Query().Get("uddg"); decoded != "" {
+					link = decoded
+				}
+			}
+		}
+		if title != "" {
+			b.WriteString(fmt.Sprintf("%d. %s\n", count+1, title))
+			if link != "" {
+				b.WriteString(fmt.Sprintf("   %s\n", link))
+			}
+			if snippet != "" {
+				b.WriteString(fmt.Sprintf("   %s\n", snippet))
+			}
+			b.WriteString("\n")
+			count++
+		}
+	})
+
+	if count == 0 {
+		doc.Find(".results_links").Each(func(i int, s *goquery.Selection) {
+			if count >= 10 {
+				return
+			}
+			title := strings.TrimSpace(s.Find(".results_links_title a").Text())
+			link, _ := s.Find(".results_links_title a").Attr("href")
+			snippet := strings.TrimSpace(s.Find(".results_links_snippet").Text())
+			if title != "" {
+				b.WriteString(fmt.Sprintf("%d. %s\n", count+1, title))
+				if link != "" {
+					b.WriteString(fmt.Sprintf("   %s\n", link))
+				}
+				if snippet != "" {
+					b.WriteString(fmt.Sprintf("   %s\n", snippet))
+				}
+				b.WriteString("\n")
+				count++
+			}
+		})
+	}
+
+	if count == 0 {
+		return fmt.Sprintf("未找到关于 \"%s\" 的搜索结果，请尝试其他关键词", query), nil
+	}
+	return b.String(), nil
+}
+
+// searchBing 使用 Bing 搜索（国内可访问）
+func searchBing(ctx context.Context, query string) (string, error) {
+	searchURL := fmt.Sprintf("https://www.bing.com/search?q=%s&count=10", url.QueryEscape(query))
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("搜索请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("解析搜索结果失败: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("搜索结果: %s\n\n", query))
+
+	count := 0
+	doc.Find("#b_results > .b_algo").Each(func(i int, s *goquery.Selection) {
+		if count >= 10 {
+			return
+		}
+		title := strings.TrimSpace(s.Find("h2 a").Text())
+		link, _ := s.Find("h2 a").Attr("href")
+		snippet := strings.TrimSpace(s.Find(".b_caption p").Text())
+		if snippet == "" {
+			snippet = strings.TrimSpace(s.Find(".b_lineclamp2").Text())
+		}
+
+		if title != "" {
+			b.WriteString(fmt.Sprintf("%d. %s\n", count+1, title))
+			if link != "" {
+				b.WriteString(fmt.Sprintf("   %s\n", link))
+			}
+			if snippet != "" {
+				b.WriteString(fmt.Sprintf("   %s\n", snippet))
+			}
+			b.WriteString("\n")
+			count++
+		}
+	})
+
+	if count == 0 {
+		return fmt.Sprintf("未找到关于 \"%s\" 的搜索结果，请尝试其他关键词", query), nil
+	}
+	return b.String(), nil
 }
 
 // renderNode renders an AST node back to formatted Go source string

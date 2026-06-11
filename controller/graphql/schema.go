@@ -245,6 +245,9 @@ func init() {
 			"parent_id": &graphql.Field{
 				Type: graphql.Int,
 			},
+			"place_id": &graphql.Field{
+				Type: graphql.Int,
+			},
 			"created_time": &graphql.Field{
 				Type: graphql.Int,
 			},
@@ -347,6 +350,9 @@ func init() {
 			"favorite_count": &graphql.Field{
 				Type: graphql.Int,
 			},
+			"average_score": &graphql.Field{
+				Type: graphql.Float,
+			},
 			"option_type": &graphql.Field{
 				Type: graphql.Int,
 			},
@@ -356,13 +362,7 @@ func init() {
 			"weight_unit": &graphql.Field{
 				Type: graphql.String,
 			},
-			"is_wholesale": &graphql.Field{
-				Type: graphql.Boolean,
-			},
 			"allow_oversold": &graphql.Field{
-				Type: graphql.Boolean,
-			},
-			"has_order_fields": &graphql.Field{
 				Type: graphql.Boolean,
 			},
 			// 关联对象和计算字段
@@ -1111,6 +1111,9 @@ func init() {
 						Type: graphql.Boolean,
 					},
 					"parent_id": &graphql.ArgumentConfig{
+						Type: graphql.Int,
+					},
+					"place_id": &graphql.ArgumentConfig{
 						Type: graphql.Int,
 					},
 					"category_id": &graphql.ArgumentConfig{

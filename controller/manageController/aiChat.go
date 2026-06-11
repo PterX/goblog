@@ -91,12 +91,11 @@ func AiChat(ctx iris.Context) {
 			}
 			slog.Info("AI client initialized with config from message")
 			// 清空 message，避免将配置内容当作聊天消息处理
-			sendSSEWarning(writer, "已添加AI配置")
 			warningData, _ := json.Marshal(iris.Map{
 				"v":         "已添加AI配置",
 				"timestamp": time.Now().Unix(),
 			})
-			fmt.Fprintf(writer, "event: warning\ndata: %s\n\n", string(warningData))
+			fmt.Fprintf(writer, "event: message\ndata: %s\n\n", string(warningData))
 			writer.Flush()
 			return
 		}

@@ -23,6 +23,7 @@ type UserRequest struct {
 	Password   string `json:"password"`
 	InviteCode string `json:"invite_code"`
 	ExpireTime int64  `json:"expire_time"`
+	UpdateAll  bool   `json:"update_all"`
 
 	Extra map[string]interface{} `json:"extra"`
 }
@@ -47,19 +48,24 @@ type UserGroupRequest struct {
 }
 
 type ApiRegisterRequest struct {
-	InviteId  uint   `json:"invite_id"` // 邀请用户ID
-	UserName  string `json:"user_name"`
-	FirstName string `json:"first_name"`
-	LastName  string `json:"last_name"`
-	Password  string `json:"password"`
-	RealName  string `json:"real_name"`
-	AvatarURL string `json:"avatar_url"`
-	Email     string `json:"email"`
-	Phone     string `json:"phone"`
-	CaptchaId string `json:"captcha_id"`
-	Captcha   string `json:"captcha"`
-	Code      string `json:"code"` //phone verify code
-	State     string `json:"state"`
+	InviteId      uint   `json:"invite_id"` // 邀请用户ID
+	UserName      string `json:"user_name"`
+	FirstName     string `json:"first_name"`
+	LastName      string `json:"last_name"`
+	Password      string `json:"password"`
+	RealName      string `json:"real_name"`
+	AvatarURL     string `json:"avatar_url"`
+	Birthday      int64  `json:"birthday"`
+	Introduce     string `json:"introduce"`
+	Email         string `json:"email"`
+	Phone         string `json:"phone"`
+	CaptchaId     string `json:"captcha_id"`
+	Captcha       string `json:"captcha"`
+	Code          string `json:"code"`  //phone verify code
+	State         string `json:"state"` // 注册状态
+	ResetPassword bool   `json:"reset_password"`
+
+	Extra map[string]interface{} `json:"extra"`
 }
 
 type ApiLoginRequest struct {

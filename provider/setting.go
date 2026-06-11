@@ -68,6 +68,7 @@ const (
 	CommunicationSettingKey = "communication"
 	LLMsSettingKey          = "llms"
 	AiSettingKey            = "ai_setting"
+	PlaceSettingKey         = "place"
 
 	CollectorSettingKey = "collector"
 	KeywordSettingKey   = "keyword"
@@ -131,6 +132,7 @@ func (w *Website) InitSetting() {
 	w.LoadJsonLdSetting(settingMap[JsonLdSettingKey])
 	w.LoadLLMsSetting(settingMap[LLMsSettingKey])
 	w.LoadAiSetting(settingMap[AiSettingKey])
+	w.LoadPlaceSetting(settingMap[PlaceSettingKey])
 	// 检查OpenAIAPI是否可用
 	go w.CheckOpenAIAPIValid()
 }
@@ -433,6 +435,9 @@ func (w *Website) LoadUserSetting(value string) {
 	}
 	if w.PluginUser.DefaultGroupId == 0 {
 		w.PluginUser.DefaultGroupId = 1
+	}
+	if w.PluginUser.DefaultStatus == "" {
+		w.PluginUser.DefaultStatus = "normal"
 	}
 }
 
@@ -787,6 +792,19 @@ func (w *Website) LoadAiSetting(value string) {
 	}
 }
 
+func (w *Website) LoadPlaceSetting(value string) {
+	w.PluginPlace = &config.PluginPlaceConfig{}
+	if value == "" {
+		return
+	}
+
+	if err := json.Unmarshal([]byte(value), w.PluginPlace); err != nil {
+		return
+	}
+
+	return
+}
+
 func (w *Website) GetDiyFieldSetting() []config.CustomField {
 	var fields []config.CustomField
 	err := w.Cache.Get(DiyFieldsKey, &fields)
@@ -1016,7 +1034,11 @@ func (w *Website) GetGoogleAuthSetting() *config.PluginGoogleAuthConfig {
 	if value != "" {
 		_ = json.Unmarshal([]byte(value), &cfg)
 	}
-	cfg.RedirectUrl = w.System.BaseUrl + "/login/google"
+	frontUrl := w.System.BaseUrl
+	if w.System.FrontUrl != "" {
+		frontUrl = w.System.FrontUrl
+	}
+	cfg.RedirectUrl = frontUrl + "/login/google"
 
 	return &cfg
 }

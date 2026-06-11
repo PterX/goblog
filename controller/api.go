@@ -25,6 +25,7 @@ func ApiImportArchive(ctx iris.Context) {
 	currentSite := provider.CurrentSite(ctx)
 	id := ctx.PostValueInt64Default("id", 0)
 	parentId := ctx.PostValueInt64Default("parent_id", 0)
+	placeId := ctx.PostValueInt64Default("place_id", 0)
 	title := ctx.PostValueTrim("title")
 	seoTitle := ctx.PostValueTrim("seo_title")
 	content := ctx.PostValueTrim("content")
@@ -158,6 +159,7 @@ func ApiImportArchive(ctx iris.Context) {
 
 	var req = request.Archive{
 		ParentId:     parentId,
+		PlaceId:      uint(placeId),
 		Title:        title,
 		SeoTitle:     seoTitle,
 		CategoryId:   categoryId,
@@ -192,6 +194,7 @@ func ApiImportArchive(ctx iris.Context) {
 			archiveDraft := model.ArchiveDraft{
 				Archive: model.Archive{
 					ParentId:    parentId,
+					PlaceId:     uint(placeId),
 					Title:       title,
 					SeoTitle:    seoTitle,
 					UrlToken:    urlToken,
@@ -503,7 +506,11 @@ func ApiImportMakeSitemap(ctx iris.Context) {
 				//由于sitemap的更新可能很频繁，因此sitemap的更新时间直接写入一个文件中
 				pluginSitemap.UpdatedTime = currentSite.GetSitemapTime()
 				// 写入Sitemap的url
-				pluginSitemap.SitemapURL = currentSite.System.BaseUrl + "/sitemap." + pluginSitemap.Type
+				frontUrl := currentSite.System.BaseUrl
+				if currentSite.System.FrontUrl != "" {
+					frontUrl = currentSite.System.FrontUrl
+				}
+				pluginSitemap.SitemapURL = frontUrl + "/sitemap." + pluginSitemap.Type
 
 				currentSite.AddAdminLog(ctx, ctx.Tr("UpdateSitemapManually"))
 			}
@@ -530,7 +537,11 @@ func ApiImportMakeSitemap(ctx iris.Context) {
 	//由于sitemap的更新可能很频繁，因此sitemap的更新时间直接写入一个文件中
 	pluginSitemap.UpdatedTime = currentSite.GetSitemapTime()
 	// 写入Sitemap的url
-	pluginSitemap.SitemapURL = currentSite.System.BaseUrl + "/sitemap." + pluginSitemap.Type
+	frontUrl := currentSite.System.BaseUrl
+	if currentSite.System.FrontUrl != "" {
+		frontUrl = currentSite.System.FrontUrl
+	}
+	pluginSitemap.SitemapURL = frontUrl + "/sitemap." + pluginSitemap.Type
 
 	currentSite.AddAdminLog(ctx, ctx.Tr("UpdateSitemapManually"))
 

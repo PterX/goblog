@@ -1,6 +1,6 @@
 package config
 
-const Version = "3.5.8"
+const Version = "3.5.10"
 const Trial = false
 const VersionType = ""
 
@@ -199,4 +199,21 @@ const (
 
 	MultiLangSiteTypeMulti  = "multi"
 	MultiLangSiteTypeSingle = "single"
+)
+
+const (
+	UserStatusActive  = 1  // 已激活
+	UserStatusPending = 0  // 待审核
+	UserStatusBlocked = -1 // 已封禁
+)
+
+const (
+	GuestbookPushWayEmail = 1
+	GuestbookPushWaySite  = 2
+	GuestbookPushWayApi   = 3
+)
+
+const (
+	PlaceUrlTypeSubdomain = "subdomain"
+	PlaceUrlTypeDirectory = "directory"
 )
