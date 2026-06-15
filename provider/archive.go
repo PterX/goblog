@@ -528,6 +528,14 @@ func (w *Website) SaveArchive(req *request.Archive) (*model.Archive, error) {
 		req.CategoryId = req.CategoryIds[0]
 	}
 
+	if req.CategoryId > 0 {
+		category := w.GetCategoryFromCache(req.CategoryId)
+		if category == nil {
+			return nil, errors.New(w.Tr("PleaseSelectAColumn"))
+		}
+		req.ModuleId = category.ModuleId
+	}
+
 	var category *model.Category
 	var module *model.Module
 	var draft *model.ArchiveDraft
@@ -762,6 +770,11 @@ func (w *Website) SaveArchive(req *request.Archive) (*model.Archive, error) {
 			req.OriginTitle = string([]rune(req.OriginTitle)[:190])
 		}
 		draft.OriginTitle = req.OriginTitle
+	}
+
+	module = w.GetModuleFromCache(draft.ModuleId)
+	if module == nil {
+		return nil, errors.New(w.Tr("UndefinedModel"))
 	}
 
 	extraFields := map[string]interface{}{}

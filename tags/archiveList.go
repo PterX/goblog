@@ -397,7 +397,9 @@ func (node *tagArchiveListNode) Execute(ctx *pongo2.ExecutionContext, writer pon
 			}
 		}
 		pager := makePagination(currentSite, total, currentPage, limit, urlPatten, 5)
-		webInfo.TotalPages = pager.TotalPages
+		if webInfo != nil {
+			webInfo.TotalPages = pager.TotalPages
+		}
 		ctx.Public["pagination"] = pager
 		ctx.Private["totalItems"] = total
 
