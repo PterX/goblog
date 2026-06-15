@@ -23,6 +23,7 @@ type PluginSitemapConfig struct {
 	Type        string `json:"type"`
 	UpdatedTime int64  `json:"updated_time"`
 	SitemapURL  string `json:"sitemap_url"`
+	PageSize    int    `json:"page_size"`
 
 	ExcludeTag         bool   `json:"exclude_tag"`
 	ExcludeModuleIds   []uint `json:"exclude_module_ids"`

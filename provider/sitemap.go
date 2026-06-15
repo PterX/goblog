@@ -196,7 +196,7 @@ func (w *Website) BuildSitemap() error {
 
 		//写入archive-sitemap
 		archiveFile := NewSitemapGenerator(w, fmt.Sprintf("%sarchive-%d.%s", w.PublicPath, page, w.PluginSitemap.Type), baseUrl, false)
-		remainNum := SitemapLimit
+		remainNum := w.PluginSitemap.PageSize
 		finished := false
 		for remainNum > 0 {
 			// 单次查询2000条
@@ -255,7 +255,7 @@ func (w *Website) BuildSitemap() error {
 
 			//写入tag-sitemap
 			tagFile := NewSitemapGenerator(w, fmt.Sprintf("%stag-%d.%s", w.PublicPath, page, w.PluginSitemap.Type), baseUrl, false)
-			remainNum := SitemapLimit
+			remainNum := w.PluginSitemap.PageSize
 			finished := false
 			for remainNum > 0 {
 				// 单次查询5000条
@@ -423,7 +423,7 @@ func (w *Website) AddonSitemap(itemType string, link string, lastmod string, dat
 				}
 			}
 		}
-		if len(archiveFile.Urls) >= SitemapLimit {
+		if len(archiveFile.Urls) >= w.PluginSitemap.PageSize {
 			// 生成新文件
 			latestSitemapId++
 			//写入index
@@ -484,7 +484,7 @@ func (w *Website) AddonSitemap(itemType string, link string, lastmod string, dat
 				}
 			}
 		}
-		if len(tagFile.Urls) >= SitemapLimit {
+		if len(tagFile.Urls) >= w.PluginSitemap.PageSize {
 			latestSitemapId++
 			indexFile.AddIndex(fmt.Sprintf("%s/tag-%d.%s", frontUrl, latestSitemapId, w.PluginSitemap.Type))
 			tagPathNew := fmt.Sprintf("%stag-%d.%s", w.PublicPath, latestSitemapId, w.PluginSitemap.Type)

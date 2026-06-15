@@ -326,6 +326,10 @@ func (w *Website) LoadSitemapSetting(value string) {
 	if w.PluginSitemap.Type != "xml" {
 		w.PluginSitemap.Type = "txt"
 	}
+	if w.PluginSitemap.PageSize == 0 {
+		// 默认2万
+		w.PluginSitemap.PageSize = 20000
+	}
 }
 
 func (w *Website) LoadRewriteSetting(value string) {
