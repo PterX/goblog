@@ -1,6 +1,6 @@
 package config
 
-const Version = "3.5.10"
+const Version = "3.6.0"
 const Trial = false
 const VersionType = ""
 
