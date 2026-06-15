@@ -23,6 +23,7 @@ type PluginSitemapConfig struct {
 	Type        string `json:"type"`
 	UpdatedTime int64  `json:"updated_time"`
 	SitemapURL  string `json:"sitemap_url"`
+	PageSize    int    `json:"page_size"`
 
 	ExcludeTag         bool   `json:"exclude_tag"`
 	ExcludeModuleIds   []uint `json:"exclude_module_ids"`
@@ -454,6 +455,12 @@ type PluginLLMsConfig struct {
 	LLMSDescrption       string `json:"llms_description"`       // LLMs.txt 描述, 在URL列表之前添加了可选的介绍文本。使用此文本解释LLMs.txt文件的用途或结构。
 	LLMSAfterDescription string `json:"llms_after_description"` // 在链接或内容条目列表之前插入的可选文本。您可以在网址开始之前使用它来添加额外的注释、上下文或数据使用信息。
 	LLMSEndDescription   string `json:"llms_end_description"`   // 附加在LLMs.txt文件底部的结尾文本（例如页脚、联系方式或免责声明信息）。
+}
+
+type PluginPlaceConfig struct {
+	Open    bool          `json:"open"`
+	UrlType string        `json:"url_type"` // URL形式，subdomain|directory,默认：directory
+	Fields  []CustomField `json:"fields"`   // 自定义字段
 }
 
 func (g *CustomField) SplitContent() []string {

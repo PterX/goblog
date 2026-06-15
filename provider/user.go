@@ -115,42 +115,72 @@ func (w *Website) GetUsersInfoByIds(userIds []uint) []*model.User {
 	return users
 }
 
-func (w *Website) SaveUserInfo(req *request.UserRequest) error {
+func (w *Website) SaveUserInfo(req *request.UserRequest) (*model.User, error) {
 	var user *model.User
 	var err error
 	if req.Id > 0 {
 		user, err = w.GetUserInfoById(req.Id)
 		if err != nil {
 			// 用户不存在
-			return err
+			return nil, err
 		}
 	} else {
 		user = &model.User{}
 	}
 
-	user.UserName = req.UserName
-	user.RealName = req.RealName
-	user.FirstName = req.FirstName
-	user.LastName = req.LastName
-	user.Birthday = req.Birthday
-	user.AvatarURL = req.AvatarURL
-	user.Introduce = req.Introduce
-	user.Phone = req.Phone
-	user.Email = req.Email
-	user.IsRetailer = req.IsRetailer
-	user.ParentId = req.ParentId
-	user.InviteCode = req.InviteCode
-	user.GroupId = req.GroupId
-	user.ExpireTime = req.ExpireTime
-	user.Status = req.Status
+	if req.UpdateAll || req.UserName != "" {
+		user.UserName = req.UserName
+	}
+	if req.UpdateAll || req.RealName != "" {
+		user.RealName = req.RealName
+	}
+	if req.UpdateAll || req.FirstName != "" {
+		user.FirstName = req.FirstName
+	}
+	if req.UpdateAll || req.LastName != "" {
+		user.LastName = req.LastName
+	}
+	if req.UpdateAll || req.Birthday > 0 {
+		user.Birthday = req.Birthday
+	}
+	if req.UpdateAll || req.AvatarURL != "" {
+		user.AvatarURL = req.AvatarURL
+		user.AvatarURL = strings.TrimPrefix(user.AvatarURL, w.PluginStorage.StorageUrl)
+	}
+	if req.UpdateAll || req.Introduce != "" {
+		user.Introduce = req.Introduce
+	}
+	if req.UpdateAll || req.Phone != "" {
+		user.Phone = req.Phone
+	}
+	if req.UpdateAll || req.Email != "" {
+		user.Email = req.Email
+	}
+	if req.UpdateAll || req.IsRetailer > 0 {
+		user.IsRetailer = req.IsRetailer
+	}
+	if req.UpdateAll || req.ParentId > 0 {
+		user.ParentId = req.ParentId
+	}
+	if req.UpdateAll || req.InviteCode != "" {
+		user.InviteCode = req.InviteCode
+	}
+	if req.UpdateAll || req.GroupId > 0 {
+		user.GroupId = req.GroupId
+	}
+	if req.UpdateAll || req.ExpireTime > 0 {
+		user.ExpireTime = req.ExpireTime
+	}
+	if req.UpdateAll || req.Status > 0 {
+		user.Status = req.Status
+		if user.GroupId == 0 {
+			user.GroupId = w.PluginUser.DefaultGroupId
+		}
+	}
 
-	user.AvatarURL = strings.TrimPrefix(user.AvatarURL, w.PluginStorage.StorageUrl)
 	req.Password = strings.TrimSpace(req.Password)
 	if req.Password != "" {
 		user.EncryptPassword(req.Password)
-	}
-	if user.GroupId == 0 {
-		user.GroupId = w.PluginUser.DefaultGroupId
 	}
 
 	err = w.DB.Save(user).Error
@@ -219,7 +249,7 @@ func (w *Website) SaveUserInfo(req *request.UserRequest) error {
 		//入库
 		w.DB.Model(model.User{}).Where("`id` = ?", user.Id).Updates(extraFields)
 	}
-	return err
+	return user, err
 }
 
 func (w *Website) DeleteUserInfo(userId uint) error {

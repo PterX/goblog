@@ -1,6 +1,6 @@
 package config
 
-const Version = "3.5.9"
+const Version = "3.6.0"
 const Trial = false
 const VersionType = ""
 
@@ -211,4 +211,9 @@ const (
 	GuestbookPushWayEmail = 1
 	GuestbookPushWaySite  = 2
 	GuestbookPushWayApi   = 3
+)
+
+const (
+	PlaceUrlTypeSubdomain = "subdomain"
+	PlaceUrlTypeDirectory = "directory"
 )

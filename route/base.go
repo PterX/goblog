@@ -132,6 +132,8 @@ func Register(app *iris.Application, systemFiles embed.FS) {
 		api.Get("/tag/data/list", controller.CheckApiOpen, middleware.HandlerTimeout, controller.ApiTagDataList)
 		api.Get("/tag/list", controller.CheckApiOpen, middleware.HandlerTimeout, controller.ApiTagList)
 		api.Get("/banner/list", controller.CheckApiOpen, middleware.HandlerTimeout, controller.ApiBannerList)
+		api.Get("/place/detail", controller.CheckApiOpen, middleware.HandlerTimeout, controller.ApiPlaceDetail)
+		api.Get("/place/list", controller.CheckApiOpen, middleware.HandlerTimeout, controller.ApiPlaceList)
 		api.Get("/metadata", controller.CheckApiOpen, middleware.HandlerTimeout, controller.ApiMetadata)
 		api.Post("/attachment/upload", controller.CheckApiOpen, controller.ApiAttachmentUpload)
 		api.Post("/comment/publish", controller.CheckApiOpen, controller.ApiCommentPublish)

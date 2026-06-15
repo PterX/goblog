@@ -46,12 +46,19 @@ func manageRoute(app *iris.Application, systemFiles embed.FS) {
 			anqi.Post("/ai/pseudo", manageController.AnqiAiPseudoArticle)
 			anqi.Post("/ai/stream", manageController.AuthAiGenerateStream)
 			anqi.Get("/ai/stream/data", manageController.AuthAiGenerateStreamData)
-			anqi.Post("/ai/chat", manageController.AuthAiChat)
+			anqi.Post("/ai/chat", manageController.AiChat)
+			anqi.Get("/ai/history", manageController.GetAiHistory)
+			anqi.Get("/ai/health", manageController.AiHealth)
 			anqi.Post("/ai/image", manageController.AuthAiGenerateImage)
 			anqi.Post("/ai/image/confirm", manageController.AuthAiGenerateImageConfirm)
 			anqi.Get("/ai/image/histories", manageController.AuthAiGenerateImageHistories)
 			anqi.Post("/extract/keywords", manageController.AuthExtractKeywords)
 			anqi.Post("/extract/description", manageController.AuthExtractDescription)
+			anqi.Get("/skill/list", manageController.SkillList)
+			anqi.Get("/skill/detail", manageController.SkillDetail)
+			anqi.Post("/skill/edit", manageController.SkillEdit)
+			anqi.Post("/skill/delete", manageController.SkillDelete)
+			anqi.Post("/skill/reload", manageController.SkillReload)
 			anqi.Post("/restart", manageController.RestartAnqicms)
 		}
 
@@ -582,6 +589,15 @@ func manageRoute(app *iris.Application, systemFiles embed.FS) {
 				llms.Post("/build", manageController.PluginLLMsBuild)
 				llms.Get("/setting", manageController.PluginGetLLMsSetting)
 				llms.Post("/setting", manageController.PluginSaveLLMsSetting)
+			}
+			place := plugin.Party("/place")
+			{
+				place.Get("/setting", manageController.PluginGetPlaceSetting)
+				place.Post("/setting", manageController.PluginSavePlaceSetting)
+				place.Get("/list", manageController.PluginPlaceList)
+				place.Get("/detail", manageController.PlaceDetail)
+				place.Post("/detail", manageController.PlaceDetailForm)
+				place.Post("/delete", manageController.PlaceDelete)
 			}
 		}
 	}

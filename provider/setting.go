@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"regexp"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"kandaoni.com/anqicms/config"
 	"kandaoni.com/anqicms/library"
 	"kandaoni.com/anqicms/model"
+	"kandaoni.com/anqicms/pkg/ai/eino"
 	"kandaoni.com/anqicms/response"
 )
 
@@ -65,6 +67,8 @@ const (
 	CurrencySettingKey      = "currency"
 	CommunicationSettingKey = "communication"
 	LLMsSettingKey          = "llms"
+	AiSettingKey            = "ai_setting"
+	PlaceSettingKey         = "place"
 
 	CollectorSettingKey = "collector"
 	KeywordSettingKey   = "keyword"
@@ -127,6 +131,8 @@ func (w *Website) InitSetting() {
 	w.LoadTranslateSetting(settingMap[TranslateSettingKey])
 	w.LoadJsonLdSetting(settingMap[JsonLdSettingKey])
 	w.LoadLLMsSetting(settingMap[LLMsSettingKey])
+	w.LoadAiSetting(settingMap[AiSettingKey])
+	w.LoadPlaceSetting(settingMap[PlaceSettingKey])
 	// 检查OpenAIAPI是否可用
 	go w.CheckOpenAIAPIValid()
 }
@@ -319,6 +325,10 @@ func (w *Website) LoadSitemapSetting(value string) {
 	// sitemap
 	if w.PluginSitemap.Type != "xml" {
 		w.PluginSitemap.Type = "txt"
+	}
+	if w.PluginSitemap.PageSize == 0 {
+		// 默认2万
+		w.PluginSitemap.PageSize = 20000
 	}
 }
 
@@ -766,6 +776,33 @@ func (w *Website) LoadLLMsSetting(value string) {
 	}
 
 	if err := json.Unmarshal([]byte(value), w.PluginLLMs); err != nil {
+		return
+	}
+
+	return
+}
+
+func (w *Website) LoadAiSetting(value string) {
+	var setting eino.Config
+
+	if err := json.Unmarshal([]byte(value), &setting); err != nil {
+		return
+	}
+
+	if err := eino.SetGlobalConfig(&setting); err != nil {
+		slog.Error("Failed to initialize AI client", "error", err)
+	} else {
+		slog.Info("AI client initialized successfully")
+	}
+}
+
+func (w *Website) LoadPlaceSetting(value string) {
+	w.PluginPlace = &config.PluginPlaceConfig{}
+	if value == "" {
+		return
+	}
+
+	if err := json.Unmarshal([]byte(value), w.PluginPlace); err != nil {
 		return
 	}
 

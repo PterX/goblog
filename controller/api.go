@@ -25,6 +25,7 @@ func ApiImportArchive(ctx iris.Context) {
 	currentSite := provider.CurrentSite(ctx)
 	id := ctx.PostValueInt64Default("id", 0)
 	parentId := ctx.PostValueInt64Default("parent_id", 0)
+	placeId := ctx.PostValueInt64Default("place_id", 0)
 	title := ctx.PostValueTrim("title")
 	seoTitle := ctx.PostValueTrim("seo_title")
 	content := ctx.PostValueTrim("content")
@@ -158,6 +159,7 @@ func ApiImportArchive(ctx iris.Context) {
 
 	var req = request.Archive{
 		ParentId:     parentId,
+		PlaceId:      uint(placeId),
 		Title:        title,
 		SeoTitle:     seoTitle,
 		CategoryId:   categoryId,
@@ -192,6 +194,7 @@ func ApiImportArchive(ctx iris.Context) {
 			archiveDraft := model.ArchiveDraft{
 				Archive: model.Archive{
 					ParentId:    parentId,
+					PlaceId:     uint(placeId),
 					Title:       title,
 					SeoTitle:    seoTitle,
 					UrlToken:    urlToken,
@@ -340,7 +343,7 @@ func ApiImportArchive(ctx iris.Context) {
 			}
 		}
 	}
-
+	req.UpdateAll = true
 	archive, err := currentSite.SaveArchive(&req)
 	if err != nil {
 		ctx.JSON(iris.Map{

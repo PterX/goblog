@@ -14,3 +14,4 @@ goblog
 collector.json
 keyword.json
 *.log
+.atomcode
