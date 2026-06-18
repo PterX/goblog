@@ -1,6 +1,6 @@
 module kandaoni.com/anqicms
 
-go 1.25.0
+go 1.25.5
 
 require (
 	cloud.google.com/go/storage v1.58.0
@@ -41,7 +41,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/mojocn/base64Captcha v1.3.8
 	github.com/mozillazg/go-pinyin v0.21.0
-	github.com/parnurzeal/gorequest v0.3.1-0.20240221155414-2f6d15e4738b
+	github.com/parnurzeal/gorequest v0.2.17
 	github.com/pkg/sftp v1.13.10
 	github.com/qiniu/go-sdk/v7 v7.25.5
 	github.com/robfig/cron/v3 v3.0.1
@@ -236,4 +236,5 @@ require (
 	modernc.org/sortutil v1.2.1 // indirect
 	modernc.org/zappy v1.1.0 // indirect
 	moul.io/http2curl v1.0.0 // indirect
+	moul.io/http2curl/v2 v2.3.0 // indirect
 )
