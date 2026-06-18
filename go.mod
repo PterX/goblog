@@ -49,7 +49,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.25.11
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
-	github.com/tencentyun/cos-go-sdk-v5 v0.7.61
+	github.com/tencentyun/cos-go-sdk-v5 v0.7.74
 	github.com/upyun/go-sdk/v3 v3.0.4
 	github.com/wneessen/go-mail v0.7.2
 	github.com/xuri/excelize/v2 v2.10.0
@@ -235,6 +235,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/sortutil v1.2.1 // indirect
 	modernc.org/zappy v1.1.0 // indirect
-	moul.io/http2curl v1.0.0 // indirect
 	moul.io/http2curl/v2 v2.3.0 // indirect
 )
