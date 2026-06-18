@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kataras/iris/v12"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"kandaoni.com/anqicms/config"
 	"kandaoni.com/anqicms/controller"
@@ -196,6 +197,13 @@ func AdminLogin(ctx iris.Context) {
 	admin.IsSuper = currentSite.Id == 1 && admin.GroupId == 1
 	// 记录用户登录时间
 	currentSite.DB.Model(admin).UpdateColumn("login_time", time.Now().Unix())
+
+	// 密码成本因子升级：旧密码使用低成本因子时自动升级
+	cost, _ := bcrypt.Cost([]byte(admin.Password))
+	if cost < model.BcryptCost {
+		admin.EncryptPassword(req.Password)
+		currentSite.DB.Model(admin).UpdateColumn("password", admin.Password)
+	}
 
 	// 记录日志
 	adminLog := model.AdminLoginLog{

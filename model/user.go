@@ -148,7 +148,7 @@ func (u *User) EncryptPassword(password string) error {
 		return errors.New("密码为空")
 	}
 	pass := []byte(password)
-	hash, err := bcrypt.GenerateFromPassword(pass, bcrypt.MinCost)
+	hash, err := bcrypt.GenerateFromPassword(pass, BcryptCost)
 	if err != nil {
 		return err
 	}

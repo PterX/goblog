@@ -19,6 +19,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/medivhzhan/weapp/v3"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/image/webp"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -752,6 +753,13 @@ func (w *Website) LoginViaPassword(req *request.ApiLoginRequest) (*model.User, e
 	ok := user.CheckPassword(req.Password)
 	if !ok {
 		return nil, errors.New(w.Tr("WrongPassword"))
+	}
+
+	// 密码成本因子升级：旧密码使用低成本因子时自动升级
+	cost, _ := bcrypt.Cost([]byte(user.Password))
+	if cost < model.BcryptCost {
+		user.EncryptPassword(req.Password)
+		w.DB.Model(&user).UpdateColumn("password", user.Password)
 	}
 
 	user.Token = w.GetUserAuthToken(user.Id, true)
