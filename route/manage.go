@@ -25,7 +25,7 @@ func manageRoute(app *iris.Application) {
 			password.Post("/reset", manageController.FindPasswordReset)
 		}
 
-		version := manage.Party("/version")
+		version := manage.Party("/version", middleware.ParseAdminToken)
 		{
 			version.Get("/info", manageController.Version)
 			version.Get("/check", manageController.CheckVersion)
