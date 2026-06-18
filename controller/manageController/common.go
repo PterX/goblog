@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/kataras/iris/v12"
 	captcha "github.com/mojocn/base64Captcha"
-	"github.com/parnurzeal/gorequest"
 	"io"
 	"kandaoni.com/anqicms/config"
 	"kandaoni.com/anqicms/controller"
@@ -15,6 +14,7 @@ import (
 	"kandaoni.com/anqicms/provider"
 	"kandaoni.com/anqicms/response"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -126,16 +126,26 @@ func GetStatisticsDashboard(ctx iris.Context) {
 func CheckVersion(ctx iris.Context) {
 	link := "https://www.anqicms.com/downloads/version.json?goos=" + runtime.GOOS + "&goarch=" + runtime.GOARCH + "&type=" + config.VersionType
 	var lastVersion response.LastVersion
-	_, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).Timeout(10 * time.Second).Get(link).EndBytes()
-	if errs != nil {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(link)
+	if err != nil {
 		ctx.JSON(iris.Map{
 			"code": config.StatusOK,
 			"msg":  ctx.Tr("CheckThatTheVersionIsTheLatestVersion"),
 		})
 		return
 	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("VersionUpdateFailed"),
+		})
+		return
+	}
 
-	err := json.Unmarshal(body, &lastVersion)
+	err = json.Unmarshal(body, &lastVersion)
 	if err == nil {
 		result := library.VersionCompare(lastVersion.Version, config.Version)
 		if result == 1 {
@@ -185,8 +195,18 @@ func VersionUpgrade(ctx iris.Context) {
 		link = fmt.Sprintf("https://www.anqicms.com/downloads/anqicms-%s-%s-%s-v%s.zip", config.VersionType, runtime.GOOS, runtime.GOARCH, version)
 	}
 	// 最长等待10分钟
-	resp, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).Timeout(20 * time.Minute).Get(link).EndBytes()
-	if errs != nil || resp.StatusCode != 200 {
+	client := &http.Client{Timeout: 20 * time.Minute}
+	resp, err := client.Get(link)
+	if err != nil || resp.StatusCode != 200 {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("VersionUpdateFailed"),
+		})
+		return
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
 		ctx.JSON(iris.Map{
 			"code": config.StatusFailed,
 			"msg":  ctx.Tr("VersionUpdateFailed"),
@@ -195,7 +215,7 @@ func VersionUpgrade(ctx iris.Context) {
 	}
 	// 将文件写入
 	tmpFile := config.ExecPath + filepath.Base(link)
-	err := os.WriteFile(tmpFile, body, os.ModePerm)
+	err = os.WriteFile(tmpFile, body, os.ModePerm)
 	if err != nil {
 		ctx.JSON(iris.Map{
 			"code": config.StatusFailed,

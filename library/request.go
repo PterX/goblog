@@ -1,8 +1,10 @@
 package library
 
 import (
+	"bytes"
 	"context"
-	"github.com/parnurzeal/gorequest"
+	"encoding/json"
+	"fmt"
 	"golang.org/x/net/html/charset"
 	"io"
 	"log"
@@ -67,84 +69,139 @@ func Request(urlPath string, options *Options) (*RequestData, error) {
 	}
 	options.Method = strings.ToUpper(options.Method)
 
-	req := gorequest.New().SetDoNotClearSuperAgent(true).Timeout(options.Timeout * time.Second)
-	if options.Debug {
-		req = req.SetDebug(true)
-	}
-	//定义默认的refer
-	parsedUrl, err := url.Parse(urlPath)
-	if err != nil {
-		//log.Println(err)
-		return nil, err
-	}
-	parsedUrl.Path = ""
-	parsedUrl.RawQuery = ""
-	parsedUrl.Fragment = ""
-	req = req.Set("Referer", parsedUrl.String())
-	if options.Type != "" {
-		req = req.Type(options.Type)
-	}
-	if options.Cookies != nil {
-		req = req.AddCookies(options.Cookies)
-	}
-	if options.Query != nil {
-		req = req.Query(options.Query)
-	}
+	// 构建 HTTP 请求
+	var bodyReader io.Reader
 	if options.Data != nil {
-		req = req.Send(options.Data)
-	}
-	if options.Header != nil {
-		for i, v := range options.Header {
-			req = req.Set(i, v)
+		switch data := options.Data.(type) {
+		case string:
+			bodyReader = strings.NewReader(data)
+		case []byte:
+			bodyReader = bytes.NewReader(data)
+		default:
+			jsonBytes, err := json.Marshal(options.Data)
+			if err == nil {
+				bodyReader = bytes.NewReader(jsonBytes)
+			}
 		}
 	}
-	if options.Proxy != "" {
-		req = req.Proxy(options.Proxy)
+
+	req, err := http.NewRequest(options.Method, urlPath, bodyReader)
+	if err != nil {
+		return nil, err
 	}
 
+	// 设置默认 Referer
+	parsedUrl, err := url.Parse(urlPath)
+	if err != nil {
+		return nil, err
+	}
+	refererUrl := *parsedUrl
+	refererUrl.Path = ""
+	refererUrl.RawQuery = ""
+	refererUrl.Fragment = ""
+	req.Header.Set("Referer", refererUrl.String())
+
+	// 设置 User-Agent
 	if options.UserAgent == "" {
 		options.UserAgent = GetUserAgent(options.IsMobile)
 	}
-	req = req.Set("User-Agent", options.UserAgent)
+	req.Header.Set("User-Agent", options.UserAgent)
 
+	// 设置 Content-Type
+	if options.Type != "" {
+		req.Header.Set("Content-Type", options.Type)
+	}
+
+	// 设置自定义 Header
+	if options.Header != nil {
+		for k, v := range options.Header {
+			req.Header.Set(k, v)
+		}
+	}
+
+	// 设置 Cookie
+	if options.Cookies != nil {
+		for _, c := range options.Cookies {
+			req.AddCookie(c)
+		}
+	}
+
+	// 设置 Query 参数
+	if options.Query != nil {
+		q := req.URL.Query()
+		switch query := options.Query.(type) {
+		case string:
+			// 解析并设置
+			if queryParts := strings.Split(query, "&"); len(queryParts) > 0 {
+				for _, part := range queryParts {
+					if kv := strings.SplitN(part, "=", 2); len(kv) == 2 {
+						q.Set(kv[0], kv[1])
+					}
+				}
+			}
+		case map[string]string:
+			for k, v := range query {
+				q.Set(k, v)
+			}
+		}
+		req.URL.RawQuery = q.Encode()
+	}
+
+	// 构建 HTTP Client
+	transport := &http.Transport{}
 	if options.DialContext != nil {
-		req.Transport.DialContext = options.DialContext
+		transport.DialContext = options.DialContext
+	}
+	if options.Proxy != "" {
+		proxyUrl, err := url.Parse(options.Proxy)
+		if err == nil {
+			transport.Proxy = http.ProxyURL(proxyUrl)
+		}
 	}
 
-	if options.Method == "POST" {
-		req = req.Post(urlPath)
-	} else {
-		req = req.Get(urlPath)
+	client := &http.Client{
+		Timeout:   options.Timeout * time.Second,
+		Transport: transport,
+		// 禁止自动重定向，与 gorequest 默认一致
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
 	}
 
-	resp, body, errs := req.End()
-	if len(errs) > 0 {
-		//如果是https,则尝试退回http请求
+	resp, err := client.Do(req)
+	if err != nil {
+		// 如果是 https 错误，尝试回退到 http
 		if strings.HasPrefix(urlPath, "https") {
 			urlPath = strings.Replace(urlPath, "https://", "http://", 1)
 			return Request(urlPath, options)
 		}
-
-		return &RequestData{}, errs[0]
+		return &RequestData{}, err
 	}
+	defer resp.Body.Close()
 
-	resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return &RequestData{}, err
+	}
+	body := string(bodyBytes)
+
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(contentType, "html") {
-		// 编码处理
 		charsetName, err := getPageCharset(body, contentType)
 		if err != nil {
 			log.Println("获取页面编码失败: ", err.Error())
 		}
 		charsetName = strings.ToLower(charsetName)
-		//log.Println("当前页面编码:", charsetName)
 		charSet, _ := CharsetMap[charsetName]
 		if charSet != nil {
-			utf8Coutent, err := DecodeToUTF8([]byte(body), charSet)
+			utf8Content, err := DecodeToUTF8([]byte(body), charSet)
 			if err != nil {
 				log.Println("页面解码失败: ", err.Error())
 			} else {
-				body = string(utf8Coutent)
+				body = string(utf8Content)
 			}
 		}
 	}

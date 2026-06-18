@@ -24,7 +24,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/parnurzeal/gorequest"
 	"golang.org/x/net/html"
 	"gorm.io/gorm/clause"
 	"kandaoni.com/anqicms/config"
@@ -239,11 +238,10 @@ func (w *Website) AnqiLogin(req *request.AnqiLoginRequest) error {
 	config.AnqiUser = config.AnqiUserConfig{}
 	_ = defaultSite.SaveSettingValue(AnqiSettingKey, config.AnqiUser)
 	var result AnqiLoginResult
-	_, body, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/login").Send(req).EndStruct(&result)
-
-	if len(errs) > 0 {
+	body, err := w.anqiPostJSON("/login", req, &result)
+	if err != nil {
 		library.DebugLog(config.ExecPath+"cache/", "error.log", string(body))
-		return errs[0]
+		return err
 	}
 
 	if result.Code != 0 {
@@ -254,7 +252,7 @@ func (w *Website) AnqiLogin(req *request.AnqiLoginRequest) error {
 	config.AnqiUser = *result.Data
 	config.AnqiUser.LoginTime = time.Now().Unix()
 	config.AnqiUser.CheckTime = config.AnqiUser.LoginTime
-	err := defaultSite.SaveSettingValue(AnqiSettingKey, config.AnqiUser)
+	err = defaultSite.SaveSettingValue(AnqiSettingKey, config.AnqiUser)
 	if err != nil {
 		return err
 	}
@@ -274,9 +272,8 @@ func (w *Website) AnqiCheckLogin(force bool) {
 		defaultSite = w
 	}
 	var result AnqiLoginResult
-	_, body, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/check").Send(config.AnqiUser).EndStruct(&result)
-
-	if len(errs) > 0 {
+	body, err := w.anqiPostJSON("/check", config.AnqiUser, &result)
+	if err != nil {
 		library.DebugLog(config.ExecPath+"cache/", "error.log", string(body))
 		config.AnqiUser.CheckTime = time.Now().Unix()
 		return
@@ -340,10 +337,10 @@ func (w *Website) AnqiShareTemplate(req *request.AnqiTemplateRequest) error {
 	req.TemplateType = design.TemplateType
 	req.TemplateId = design.TemplateId
 	// 开始提交数据
-	_, body, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/template/share").Send(req).EndStruct(&result)
-	if len(errs) > 0 {
+	body, err := w.anqiPostJSON("/template/share", req, &result)
+	if err != nil {
 		library.DebugLog(config.ExecPath+"cache/", "error.log", string(body))
-		return errs[0]
+		return err
 	}
 
 	if result.Code != 0 {
@@ -370,10 +367,10 @@ func (w *Website) AnqiSendFeedback(req *request.AnqiFeedbackRequest) error {
 	req.Domain = w.System.BaseUrl
 	// 开始提交数据
 	var result AnqiDownloadTemplateResult
-	_, body, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/feedback").Send(req).EndStruct(&result)
-	if len(errs) > 0 {
+	body, err := w.anqiPostJSON("/feedback", req, &result)
+	if err != nil {
 		library.DebugLog(config.ExecPath+"cache/", "error.log", string(body))
-		return errs[0]
+		return err
 	}
 
 	if result.Code != 0 {
@@ -399,10 +396,10 @@ func (w *Website) AnqiUploadAttachment(data []byte, name string) (*AnqiAttachmen
 	}
 
 	var result AnqiAttachmentResult
-	_, body, errs := w.NewAuthReq(gorequest.TypeMultipart).Post(AnqiApi+"/template/upload").SendFile(data, name, "attach").EndStruct(&result)
-	if len(errs) > 0 {
+	body, err := w.anqiUploadFile("/template/upload", data, name, "attach", &result)
+	if err != nil {
 		library.DebugLog(config.ExecPath+"cache/", "error.log", string(body))
-		return nil, errs[0]
+		return nil, err
 	}
 	if result.Code != 0 {
 		return nil, errors.New(result.Msg)
@@ -414,10 +411,10 @@ func (w *Website) AnqiUploadAttachment(data []byte, name string) (*AnqiAttachmen
 func (w *Website) AnqiDownloadTemplate(req *request.AnqiTemplateRequest) error {
 	var result AnqiDownloadTemplateResult
 
-	_, body, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/template/download").Send(req).EndStruct(&result)
-	if len(errs) > 0 {
+	body, err := w.anqiPostJSON("/template/download", req, &result)
+	if err != nil {
 		library.DebugLog(config.ExecPath+"cache/", "error.log", string(body))
-		return errs[0]
+		return err
 	}
 	if result.Code != 0 {
 		return errors.New(result.Msg)
@@ -428,9 +425,9 @@ func (w *Website) AnqiDownloadTemplate(req *request.AnqiTemplateRequest) error {
 		return errors.New(w.Tr("ErrorInReadingDownloadAddress"))
 	}
 
-	_, body, errs = w.NewAuthReq(gorequest.TypeHTML).Get(downloadUrl).EndBytes()
-	if errs != nil {
-		return errs[0]
+	body, err = w.anqiGetBytes(downloadUrl)
+	if err != nil {
+		return err
 	}
 
 	info := &multipart.FileHeader{
@@ -441,7 +438,7 @@ func (w *Website) AnqiDownloadTemplate(req *request.AnqiTemplateRequest) error {
 	file := bytes.NewReader(body)
 
 	// 将模板写入到本地
-	err := w.UploadDesignZip(file, info, "")
+	err = w.UploadDesignZip(file, info, "")
 	if err != nil {
 		return err
 	}
@@ -478,9 +475,9 @@ func (w *Website) AnqiTranslateString(req *AnqiTranslateTextRequest) (result *An
 		return result, nil
 	} else {
 		var res AnqiTranslateResponse
-		_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/translate").Send(req).EndStruct(&res)
-		if len(errs) > 0 {
-			return nil, errs[0]
+		_, err := w.anqiPostJSON("/translate", req, &res)
+		if err != nil {
+			return nil, err
 		}
 		if res.Code != 0 {
 			return nil, errors.New(res.Msg)
@@ -544,9 +541,9 @@ func (w *Website) AnqiAiPseudoArticle(archive *model.Archive, isDraft bool) erro
 		_, err = w.SaveAiArticlePlan(&result, true)
 	} else {
 		var result AnqiAiResponse
-		_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/ai/pseudo").Send(req).EndStruct(&result)
-		if len(errs) > 0 {
-			return errs[0]
+		_, err := w.anqiPostJSON("/ai/pseudo", req, &result)
+		if err != nil {
+			return err
 		}
 		if result.Code != 0 {
 			return errors.New(result.Msg)
@@ -664,9 +661,9 @@ func (w *Website) AnqiAiGenerateArticle(keyword *model.Keyword) (int, error) {
 		_, err = w.SaveAiArticlePlan(&result, true)
 	} else {
 		var result AnqiAiResponse
-		_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/ai/generate").Send(req).EndStruct(&result)
-		if len(errs) > 0 {
-			return 0, errs[0]
+		_, err := w.anqiPostJSON("/ai/generate", req, &result)
+		if err != nil {
+			return 0, err
 		}
 		if result.Code != 0 {
 			return 0, errors.New(result.Msg)
@@ -713,9 +710,9 @@ func (w *Website) AnqiSyncAiPlanResult(plan *model.AiArticlePlan) error {
 		ReqId: plan.ReqId,
 	}
 	var result AnqiAiResponse
-	_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/ai/syncplan").Send(req).EndStruct(&result)
-	if len(errs) > 0 {
-		return errs[0]
+	_, err = w.anqiPostJSON("/ai/syncplan", req, &result)
+	if err != nil {
+		return err
 	}
 	if result.Code != 0 {
 		plan.Status = config.AiArticleStatusError
@@ -1040,9 +1037,9 @@ func (w *Website) AnqiAiGenerateStream(keyword *request.KeywordRequest) (string,
 
 func (w *Website) AnqiSyncSensitiveWords() error {
 	var result AnqiSensitiveResult
-	_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/sensitive/sync").EndStruct(&result)
-	if len(errs) > 0 {
-		return errs[0]
+	_, err := w.anqiPostJSON("/sensitive/sync", nil, &result)
+	if err != nil {
+		return err
 	}
 	if result.Code != 0 {
 		return errors.New(result.Msg)
@@ -1061,9 +1058,9 @@ func (w *Website) AnqiSyncSensitiveWords() error {
 func (w *Website) AnqiExtractKeywords(req *request.AnqiExtractRequest) ([]string, error) {
 	var result AnqiExtractResult
 
-	_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/extract/keywords").Send(req).EndStruct(&result)
-	if len(errs) > 0 {
-		return nil, errs[0]
+	_, err := w.anqiPostJSON("/extract/keywords", req, &result)
+	if err != nil {
+		return nil, err
 	}
 	if result.Code != 0 {
 		return nil, errors.New(result.Msg)
@@ -1079,9 +1076,9 @@ func (w *Website) AnqiExtractKeywords(req *request.AnqiExtractRequest) ([]string
 func (w *Website) AnqiExtractDescription(req *request.AnqiExtractRequest) ([]string, error) {
 	var result AnqiExtractResult
 
-	_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/extract/summarize").Send(req).EndStruct(&result)
-	if len(errs) > 0 {
-		return nil, errs[0]
+	_, err := w.anqiPostJSON("/extract/summarize", req, &result)
+	if err != nil {
+		return nil, err
 	}
 	if result.Code != 0 {
 		return nil, errors.New(result.Msg)
@@ -1208,9 +1205,9 @@ func (w *Website) AnqiTranslateHtml(req *AnqiTranslateHtmlRequest) (content stri
 		}
 
 		var res AnqiTranslateTextResponse
-		_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/translate/text").Send(req2).EndStruct(&res)
-		if len(errs) > 0 {
-			msg := errs[0].Error()
+		_, err := w.anqiPostJSON("/translate/text", req2, &res)
+		if err != nil {
+			msg := err.Error()
 			if utf8.RuneCountInString(msg) > 190 {
 				msg = string([]rune(msg)[:190])
 			}
@@ -1221,7 +1218,7 @@ func (w *Website) AnqiTranslateHtml(req *AnqiTranslateHtmlRequest) (content stri
 				ToLanguage: req.ToLanguage,
 				Remark:     msg,
 			})
-			return "", errs[0]
+			return "", err
 		}
 		if res.Code != 0 {
 			msg := res.Msg
@@ -1327,9 +1324,9 @@ func (w *Website) AnqiTranslateHtml(req *AnqiTranslateHtmlRequest) (content stri
 
 func (w *Website) AnqiGetImageAiResponse(req *AnqiImageAiRequest) (*AnqiAiImage, error) {
 	var result AnqiImageAiResult
-	_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Post(AnqiApi + "/ai/image").Send(req).EndStruct(&result)
-	if len(errs) > 0 {
-		return nil, errs[0]
+	_, err := w.anqiPostJSON("/ai/image", req, &result)
+	if err != nil {
+		return nil, err
 	}
 	if result.Code != 0 {
 		return nil, errors.New(result.Msg)
@@ -1340,29 +1337,160 @@ func (w *Website) AnqiGetImageAiResponse(req *AnqiImageAiRequest) (*AnqiAiImage,
 
 func (w *Website) AnqiGetAiGenerateImageHistories(page int, pageSize int) ([]AnqiAiImage, int64) {
 	var result AnqiImageAiHistoriesResult
-	_, _, errs := w.NewAuthReq(gorequest.TypeJSON).Get(AnqiApi + "/ai/image/histories").Query(map[string]string{
+	body, err := w.anqiGetJSON("/ai/image/histories", map[string]string{
 		"page":  strconv.Itoa(page),
 		"limit": strconv.Itoa(pageSize),
-	}).EndStruct(&result)
-	if len(errs) > 0 {
+	}, &result)
+	if err != nil {
+		library.DebugLog(config.ExecPath+"cache/", "error.log", string(body))
 		return nil, 0
 	}
 
 	return result.Data, result.Total
 }
 
-func (w *Website) NewAuthReq(contentType string) *gorequest.SuperAgent {
-	req := gorequest.New().
-		SetDoNotClearSuperAgent(true).
-		Timeout(300*time.Second).
-		Type(contentType).
-		Set("token", config.AnqiUser.Token).
-		//set key header
-		Set("domain", w.System.BaseUrl).
-		//set oem header
-		Set("User-Agent", "anqicms/"+config.Version)
 
-	return req
+
+// anqiPostJSON sends a JSON POST request to the AnQi API and unmarshals the response.
+func (w *Website) anqiPostJSON(endpoint string, sendData, respTarget interface{}) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	if sendData != nil {
+		jsonBytes, err := json.Marshal(sendData)
+		if err != nil {
+			return nil, err
+		}
+		buf = bytes.NewBuffer(jsonBytes)
+	}
+
+	req, err := http.NewRequest("POST", AnqiApi+endpoint, buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("token", config.AnqiUser.Token)
+	req.Header.Set("domain", w.System.BaseUrl)
+	req.Header.Set("User-Agent", "anqicms/"+config.Version)
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if respTarget != nil {
+		if err := json.Unmarshal(body, respTarget); err != nil {
+			return body, err
+		}
+	}
+	return body, nil
+}
+
+// anqiGetJSON sends a GET request with optional query params and unmarshals the response.
+func (w *Website) anqiGetJSON(endpoint string, queryData map[string]string, respTarget interface{}) ([]byte, error) {
+	req, err := http.NewRequest("GET", AnqiApi+endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("token", config.AnqiUser.Token)
+	req.Header.Set("domain", w.System.BaseUrl)
+	req.Header.Set("User-Agent", "anqicms/"+config.Version)
+
+	q := req.URL.Query()
+	for k, v := range queryData {
+		q.Set(k, v)
+	}
+	req.URL.RawQuery = q.Encode()
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if respTarget != nil {
+		if err := json.Unmarshal(body, respTarget); err != nil {
+			return body, err
+		}
+	}
+	return body, nil
+}
+
+// anqiGetBytes sends a GET request and returns raw bytes.
+func (w *Website) anqiGetBytes(url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("token", config.AnqiUser.Token)
+	req.Header.Set("domain", w.System.BaseUrl)
+	req.Header.Set("User-Agent", "anqicms/"+config.Version)
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+// anqiUploadFile uploads a file via multipart/form-data POST.
+func (w *Website) anqiUploadFile(endpoint string, data []byte, fileName, fieldName string, respTarget interface{}) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	writer := multipart.NewWriter(buf)
+	part, err := writer.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := part.Write(data); err != nil {
+		return nil, err
+	}
+	writer.Close()
+
+	req, err := http.NewRequest("POST", AnqiApi+endpoint, buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("token", config.AnqiUser.Token)
+	req.Header.Set("domain", w.System.BaseUrl)
+	req.Header.Set("User-Agent", "anqicms/"+config.Version)
+
+	client := &http.Client{Timeout: 300 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if respTarget != nil {
+		if err := json.Unmarshal(body, respTarget); err != nil {
+			return body, err
+		}
+	}
+	return body, nil
 }
 
 // Restart first need to stop iris. so it will call after iris shutdown complete.
