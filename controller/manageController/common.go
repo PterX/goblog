@@ -2,7 +2,6 @@ package manageController
 
 import (
 	"archive/zip"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/kataras/iris/v12"
@@ -127,7 +126,7 @@ func GetStatisticsDashboard(ctx iris.Context) {
 func CheckVersion(ctx iris.Context) {
 	link := "https://www.anqicms.com/downloads/version.json?goos=" + runtime.GOOS + "&goarch=" + runtime.GOARCH + "&type=" + config.VersionType
 	var lastVersion response.LastVersion
-	_, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).TLSClientConfig(&tls.Config{InsecureSkipVerify: true}).Timeout(10 * time.Second).Get(link).EndBytes()
+	_, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).Timeout(10 * time.Second).Get(link).EndBytes()
 	if errs != nil {
 		ctx.JSON(iris.Map{
 			"code": config.StatusOK,
@@ -186,7 +185,7 @@ func VersionUpgrade(ctx iris.Context) {
 		link = fmt.Sprintf("https://www.anqicms.com/downloads/anqicms-%s-%s-%s-v%s.zip", config.VersionType, runtime.GOOS, runtime.GOARCH, version)
 	}
 	// 最长等待10分钟
-	resp, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).TLSClientConfig(&tls.Config{InsecureSkipVerify: true}).Timeout(20 * time.Minute).Get(link).EndBytes()
+	resp, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).Timeout(20 * time.Minute).Get(link).EndBytes()
 	if errs != nil || resp.StatusCode != 200 {
 		ctx.JSON(iris.Map{
 			"code": config.StatusFailed,

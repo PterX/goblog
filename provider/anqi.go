@@ -3,7 +3,6 @@ package provider
 import (
 	"bufio"
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1355,7 +1354,6 @@ func (w *Website) AnqiGetAiGenerateImageHistories(page int, pageSize int) ([]Anq
 func (w *Website) NewAuthReq(contentType string) *gorequest.SuperAgent {
 	req := gorequest.New().
 		SetDoNotClearSuperAgent(true).
-		TLSClientConfig(&tls.Config{InsecureSkipVerify: true}).
 		Timeout(300*time.Second).
 		Type(contentType).
 		Set("token", config.AnqiUser.Token).
