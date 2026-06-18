@@ -590,6 +590,71 @@ func dangerousCommand(cmd string) (string, bool) {
 		return "⚠ 危险命令：递归 chown 可能影响系统文件", true
 	}
 
+	// Block pipe-to-shell: curl/wget ... | sh/bash
+	pipePatterns := []string{
+		"curl | sh", "curl | bash", "curl | zsh",
+		"wget | sh", "wget | bash", "wget | zsh",
+		"curl | sudo", "wget | sudo",
+	}
+	for _, pp := range pipePatterns {
+		if strings.Contains(clean, pp) {
+			return "⚠ 危险命令：禁止从网络下载后直接执行", true
+		}
+	}
+
+	// Block reverse shell patterns
+	reverseShellPatterns := []string{
+		"bash -i >& /dev/tcp/",
+		"bash -i >& /dev/udp/",
+		"sh -i >& /dev/tcp/",
+		"sh -i >& /dev/udp/",
+		"python -c 'import pty",
+		"python3 -c 'import pty",
+		"nc -e ", "ncat -e ",
+		"mkfifo /tmp/",
+		"exec 5<>/dev/tcp/",
+	}
+	for _, rsp := range reverseShellPatterns {
+		if strings.Contains(clean, rsp) {
+			return "⚠ 危险命令：检测到反弹 shell 模式", true
+		}
+	}
+
+	// Block writing to system directories
+	systemDirs := []string{"/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/dev/", "/proc/", "/sys/"}
+	writeCmds := []string{"> /etc/", "> /usr/", "> /bin/", "> /sbin/", "> /boot/",
+		">> /etc/", ">> /usr/", ">> /bin/", ">> /sbin/",
+		"cp ", "mv ", "chattr", "mount", "umount"}
+	for _, dir := range systemDirs {
+		for _, wc := range writeCmds {
+			if strings.Contains(clean, wc+dir) {
+				return fmt.Sprintf("⚠ 危险命令：禁止写入系统目录 '%s'", dir), true
+			}
+		}
+	}
+
+	// Block obfuscated command execution
+	obfuscationPatterns := []string{
+		"base64 -d |", "base64 -d|",
+		"base64 --decode |", "base64 --decode|",
+		"openssl enc -",
+		"eval $(", "eval \"$(",
+		"`", // backtick command substitution wrapped in... but this is very common, only block specific ones
+	}
+	for _, op := range obfuscationPatterns {
+		if strings.Contains(clean, op) {
+			// Only block if it looks like payload delivery
+			if strings.Contains(clean, "curl") || strings.Contains(clean, "wget") || strings.Contains(clean, "http") {
+				return "⚠ 危险命令：检测到编码执行的恶意命令", true
+			}
+		}
+	}
+
+	// Block direct write to sensitive project files outside allowed paths
+	if strings.Contains(clean, ">/") || strings.Contains(clean, ">>/") {
+		return "⚠ 危险命令：禁止使用绝对路径写入文件", true
+	}
+
 	return "", false
 }
 
