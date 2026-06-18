@@ -40,6 +40,13 @@ func AdminFileServ(ctx iris.Context) {
 	uri := ctx.RequestPath(false)
 	if uri != "/" {
 		uriFile := config.ExecPath + strings.TrimLeft(uri, "/")
+		// 防止路径遍历: 解析出真实路径后检查是否仍在允许的目录内
+		uriFile = filepath.Clean(uriFile)
+		basePath := filepath.Clean(config.ExecPath)
+		if !strings.HasPrefix(uriFile, basePath+string(filepath.Separator)) && uriFile != basePath {
+			ctx.StatusCode(403)
+			return
+		}
 		_, err := os.Stat(uriFile)
 		if err == nil {
 			ctx.ServeFile(uriFile)

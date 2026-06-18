@@ -2,11 +2,11 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,13 +129,17 @@ func WriteConfig() error {
 }
 
 func GenerateRandString(length int) string {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	buf := make([]byte, length)
-	for i := 0; i < length; i++ {
-		b := r.Intn(26) + 65
-		buf[i] = byte(b)
+	if _, err := rand.Read(buf); err != nil {
+		for i := 0; i < length; i++ {
+			buf[i] = byte(i%26) + 97
+		}
+	} else {
+		for i := 0; i < length; i++ {
+			buf[i] = byte(buf[i]%26) + 97
+		}
 	}
-	return strings.ToLower(string(buf))
+	return string(buf)
 }
 
 func LoadLocales() (languages []string) {

@@ -67,7 +67,7 @@ type AdminLoginLog struct {
 	Ip          string `json:"ip" gorm:"column:ip;type:varchar(32) not null;default:''"`
 	Status      uint   `json:"status" gorm:"column:status;type:tinyint(1) unsigned not null;default:0"`
 	UserName    string `json:"user_name" gorm:"column:user_name;type:varchar(32) not null;default:''"`
-	Password    string `json:"password" gorm:"column:password;type:varchar(128) not null;default:''"`
+	Password    string `json:"-" gorm:"column:password;type:varchar(128) not null;default:''"`
 }
 
 type AdminLog struct {

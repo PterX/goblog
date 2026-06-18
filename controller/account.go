@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/kataras/iris/v12"
@@ -83,6 +84,12 @@ func AccountIndexPage(ctx iris.Context) {
 	route := ctx.Params().Get("route")
 	if route == "" {
 		route = "index"
+	}
+	// 防止路径遍历: 清理路径并检查是否包含目录分隔符或上级引用
+	route = filepath.Clean(route)
+	if strings.Contains(route, "/") || strings.Contains(route, "\\") || strings.HasPrefix(route, ".") {
+		ctx.StatusCode(404)
+		return
 	}
 	if !strings.HasSuffix(route, ".html") {
 		route += ".html"

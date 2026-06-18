@@ -2,11 +2,12 @@ package library
 
 import (
 	"crypto/md5"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
+	mrand "math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -45,11 +46,10 @@ func DecimalToLetter(num int64) string {
 func GenerateRandNumber(length uint) uint {
 	numberByteArray := [9]byte{1, 2, 3, 4, 5, 6, 7, 9}
 	numberLength := len(numberByteArray)
-	rand.Seed(time.Now().UnixNano())
 
 	var stringBuilder strings.Builder
 	for i := 0; uint(i) < length; i++ {
-		fmt.Fprintf(&stringBuilder, "%d", numberByteArray[rand.Intn(numberLength)])
+		fmt.Fprintf(&stringBuilder, "%d", numberByteArray[mrand.Intn(numberLength)])
 	}
 	randomNumber, _ := strconv.ParseUint(stringBuilder.String(), 10, 0)
 	return uint(randomNumber)
@@ -59,15 +59,19 @@ func GenerateRandNumber(length uint) uint {
 func GenerateRandString(length int) string {
 	const charSet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	var output strings.Builder
-	output.Grow(length) // 提前分配足够的空间
+	output.Grow(length)
 
-	// 初始化随机数生成器
-	rd := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	for i := 0; i < length; i++ {
-		// 随机选择一个字符
-		character := charSet[rd.Intn(len(charSet))]
-		output.WriteByte(character)
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		// fallback: 用当前时间作为种子
+		rd := mrand.New(mrand.NewSource(time.Now().UnixNano()))
+		for i := 0; i < length; i++ {
+			output.WriteByte(charSet[rd.Intn(len(charSet))])
+		}
+	} else {
+		for i := 0; i < length; i++ {
+			output.WriteByte(charSet[int(buf[i])%len(charSet)])
+		}
 	}
 
 	return output.String()

@@ -147,7 +147,6 @@ func AdminLogin(ctx iris.Context) {
 			Ip:       ctx.RemoteAddr(),
 			Status:   0,
 			UserName: req.UserName,
-			Password: req.Password,
 		}
 		currentSite.DB.Create(&adminLog)
 

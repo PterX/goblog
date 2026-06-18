@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -353,10 +354,15 @@ func FileServe(ctx iris.Context) bool {
 	if uri != currentSite.BaseURI && !strings.HasSuffix(uri, "/") {
 		baseDir := currentSite.RootPath + "public"
 		uriFile := baseDir + strings.TrimPrefix(uri, strings.TrimRight(currentSite.BaseURI, "/"))
-		_, err := os.Stat(uriFile)
-		if err == nil {
-			ctx.ServeFile(uriFile)
-			return true
+		// 防止路径遍历
+		uriFile = filepath.Clean(uriFile)
+		cleanBase := filepath.Clean(baseDir)
+		if strings.HasPrefix(uriFile, cleanBase+string(filepath.Separator)) || uriFile == cleanBase {
+			_, err := os.Stat(uriFile)
+			if err == nil {
+				ctx.ServeFile(uriFile)
+				return true
+			}
 		}
 		// 多语言站点目录支持
 		mainSite := currentSite.GetMainWebsite()
@@ -364,20 +370,27 @@ func FileServe(ctx iris.Context) bool {
 			if mainSite.MultiLanguage.Type == config.MultiLangTypeSame {
 				baseDir2 := mainSite.RootPath + "public"
 				uriFile2 := baseDir2 + strings.TrimPrefix(uri, strings.TrimRight(mainSite.BaseURI, "/"))
-				_, err = os.Stat(uriFile2)
-				if err == nil {
-					ctx.ServeFile(uriFile2)
-					return true
+				uriFile2 = filepath.Clean(uriFile2)
+				cleanBase2 := filepath.Clean(baseDir2)
+				if strings.HasPrefix(uriFile2, cleanBase2+string(filepath.Separator)) || uriFile2 == cleanBase2 {
+					_, err2 := os.Stat(uriFile2)
+					if err2 == nil {
+						ctx.ServeFile(uriFile2)
+						return true
+					}
 				}
 			}
 			for i := range mainSite.MultiLanguage.SubSites {
 				lang := mainSite.MultiLanguage.SubSites[i].Language
 				if strings.HasPrefix(uri, "/"+lang+"/") {
 					uriFile = baseDir + uri[len(lang)+1:]
-					_, err = os.Stat(uriFile)
-					if err == nil {
-						_ = ctx.ServeFile(uriFile)
-						return true
+					uriFile = filepath.Clean(uriFile)
+					if strings.HasPrefix(uriFile, cleanBase+string(filepath.Separator)) || uriFile == cleanBase {
+						_, err3 := os.Stat(uriFile)
+						if err3 == nil {
+							_ = ctx.ServeFile(uriFile)
+							return true
+						}
 					}
 					break
 				}

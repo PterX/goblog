@@ -396,6 +396,22 @@ type ExplainCount struct {
 
 func (w *Website) GetExplainCount(sql string) int64 {
 	var result ExplainCount
+	// 安全防护：只允许 SELECT 查询
+	trimmed := strings.TrimSpace(sql)
+	if !strings.HasPrefix(strings.ToUpper(trimmed), "SELECT") {
+		return 0
+	}
+	// 禁止多语句和危险操作
+	upperSql := strings.ToUpper(trimmed)
+	if strings.Contains(upperSql, "INTO OUTFILE") ||
+		strings.Contains(upperSql, "INTO DUMPFILE") ||
+		strings.Contains(upperSql, "INTO @") ||
+		strings.Contains(upperSql, "SYSTEM") ||
+		strings.Contains(upperSql, "SLEEP") ||
+		strings.Contains(upperSql, "BENCHMARK") ||
+		strings.Contains(upperSql, "LOAD_FILE") {
+		return 0
+	}
 	w.DB.Raw("EXPLAIN " + sql).Scan(&result)
 
 	return result.Rows
