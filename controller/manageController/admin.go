@@ -172,6 +172,17 @@ func AdminLogin(ctx iris.Context) {
 		// 保存 store, 封禁10分钟
 		_ = currentSite.Cache.Set(storeKey, loginError, 600)
 
+		// 同时累加 IP 封禁计数，防止轮换用户名绕过
+		ipStoreKey := keyPrefix + ctx.RemoteAddr()
+		var ipLoginError response.LoginError
+		if err := currentSite.Cache.Get(ipStoreKey, &ipLoginError); err == nil {
+			ipLoginError.Times++
+		} else {
+			ipLoginError.Times = 1
+		}
+		ipLoginError.LastTime = time.Now().Unix()
+		_ = currentSite.Cache.Set(ipStoreKey, ipLoginError, 600)
+
 		// 记录日志
 		adminLog := model.AdminLoginLog{
 			AdminId:  admin.Id,
