@@ -428,7 +428,7 @@ func (w *Website) SetOrderRefund(order *model.Order, status int) error {
 				Set("out_refund_no", refund.RefundId).
 				Set("total_fee", order.Amount).
 				Set("refund_fee", refund.Amount).
-				Set("sign_type", wechat.SignType_MD5)
+				Set("sign_type", wechat.SignType_HMAC_SHA256)
 
 			wxRsp, _, err := client.Refund(context.Background(), bm)
 			if err != nil {
@@ -463,7 +463,7 @@ func (w *Website) SetOrderRefund(order *model.Order, status int) error {
 				Set("out_refund_no", refund.RefundId).
 				Set("total_fee", order.Amount).
 				Set("refund_fee", refund.Amount).
-				Set("sign_type", wechat.SignType_MD5)
+				Set("sign_type", wechat.SignType_HMAC_SHA256)
 
 			wxRsp, _, err := client.Refund(context.Background(), bm)
 			if err != nil {

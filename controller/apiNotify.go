@@ -51,7 +51,7 @@ func NotifyWechatPay(ctx iris.Context) {
 	notifyReq, err := wechat.ParseNotifyToBodyMap(ctx.Request())
 	rsp := new(wechat.NotifyResponse) // 回复微信的数据
 
-	ok, err := wechat.VerifySign(currentSite.PluginPay.WechatApiKey, wechat.SignType_MD5, notifyReq)
+	ok, err := wechat.VerifySign(currentSite.PluginPay.WechatApiKey, wechat.SignType_HMAC_SHA256, notifyReq)
 	if !ok {
 		library.DebugLog(currentSite.CachePath, "wechat.log", "err", err, fmt.Sprintf("%+v", notifyReq))
 		rsp.ReturnCode = gopay.FAIL
