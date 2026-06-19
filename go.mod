@@ -14,7 +14,6 @@ require (
 	github.com/cloudwego/eino v0.8.13
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/disintegration/imaging v1.6.3-0.20201218193011-d40f48ce0f09
-	github.com/elastic/go-elasticsearch/v8 v8.17.0
 	github.com/esap/wechat v1.1.2
 	github.com/fatih/structs v1.1.0
 	github.com/fesiong/wukong v0.0.0-20260106081515-d04b7d137f9b
@@ -116,7 +115,6 @@ require (
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/edsrzf/mmap-go v1.2.0 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
-	github.com/elastic/elastic-transport-go/v8 v8.6.0 // indirect
 	github.com/elazarl/goproxy v1.7.2 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.36.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.0 // indirect
