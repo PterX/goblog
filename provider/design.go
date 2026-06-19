@@ -23,6 +23,17 @@ import (
 	"kandaoni.com/anqicms/response"
 )
 
+// sanitizeDesignPath 清理设计器文件路径，使用白名单方式防止路径穿越
+func sanitizeDesignPath(path string) string {
+	path = strings.ReplaceAll(path, "\\", "/")
+	cleaned := filepath.Clean(path)
+	cleaned = strings.TrimLeft(cleaned, "/")
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
+	return cleaned
+}
+
 func (w *Website) GetDesignList() []response.DesignPackage {
 	// 读取目录
 	designPath := w.RootPath + "template"
@@ -471,7 +482,7 @@ func (w *Website) UploadDesignFile(file multipart.File, info *multipart.FileHead
 		return err
 	}
 
-	filePath = strings.ReplaceAll(strings.ReplaceAll(filePath, "..", ""), "\\", "/")
+	filePath = sanitizeDesignPath(filePath)
 	var realPath string
 	if fileType == "static" {
 		realPath = w.PublicPath + "static/" + designInfo.Package + "/" + filePath
@@ -527,7 +538,7 @@ func (w *Website) UploadDesignFile(file multipart.File, info *multipart.FileHead
 			_ = w.ReadAndSendLocalFiles(realPath)
 		}
 	} else {
-		info.Filename = strings.ReplaceAll(strings.ReplaceAll(info.Filename, "..", ""), "\\", "/")
+		info.Filename = sanitizeDesignPath(info.Filename)
 		realFile := realPath + "/" + info.Filename
 		// 单独文件处理
 		_ = os.MkdirAll(filepath.Dir(realFile), os.ModePerm)
@@ -558,7 +569,7 @@ func (w *Website) GetDesignFileDetail(packageName, filePath, fileType string, sc
 		return nil, errors.New(w.Tr("TemplateDoesNotExist"))
 	}
 
-	filePath = strings.ReplaceAll(strings.ReplaceAll(filePath, "..", ""), "\\", "/")
+	filePath = sanitizeDesignPath(filePath)
 	var designFileDetail response.DesignFile
 	var exists = false
 	if filePath == "" && len(designInfo.TplFiles) > 0 {
@@ -859,7 +870,7 @@ func (w *Website) SaveDesignFile(req request.SaveDesignFileRequest) error {
 		return errors.New(w.Tr("TemplateDoesNotExist"))
 	}
 
-	req.Path = strings.ReplaceAll(strings.ReplaceAll(req.Path, "..", ""), "\\", "/")
+	req.Path = sanitizeDesignPath(req.Path)
 	// 先检查文件是否存在
 	var basePath string
 	if req.Type == "static" {
@@ -899,7 +910,7 @@ func (w *Website) SaveDesignFile(req request.SaveDesignFileRequest) error {
 		}
 		// 如果进行了重命名
 		if req.RenamePath != "" && req.RenamePath != req.Path {
-			req.RenamePath = strings.ReplaceAll(strings.ReplaceAll(req.RenamePath, "..", ""), "\\", "/")
+			req.RenamePath = sanitizeDesignPath(req.RenamePath)
 			newPath := basePath + req.RenamePath
 			req.Path = strings.TrimPrefix(newPath, basePath)
 			// 移动
@@ -964,8 +975,8 @@ func (w *Website) CopyDesignFile(req request.CopyDesignFileRequest) error {
 	if err != nil {
 		return errors.New(w.Tr("TemplateDoesNotExist"))
 	}
-	req.Path = strings.ReplaceAll(strings.ReplaceAll(req.Path, "..", ""), "\\", "/")
-	req.NewPath = strings.ReplaceAll(strings.ReplaceAll(req.NewPath, "..", ""), "\\", "/")
+	req.Path = sanitizeDesignPath(req.Path)
+	req.NewPath = sanitizeDesignPath(req.NewPath)
 	// 先检查文件是否存在
 	var basePath string
 	if req.Type == "static" {
@@ -1075,7 +1086,7 @@ func (w *Website) writeDesignInfo(designInfo *response.DesignPackage) error {
 
 func (w *Website) SaveDesignTplFile(req request.SaveDesignFileRequest) error {
 	// 不能越级到上级
-	req.Path = strings.ReplaceAll(strings.ReplaceAll(req.Path, "..", ""), "\\", "/")
+	req.Path = sanitizeDesignPath(req.Path)
 	basePath := w.RootPath + "template/" + req.Package + "/"
 	fullPath := basePath + req.Path
 
@@ -1116,7 +1127,7 @@ func (w *Website) SaveDesignTplFile(req request.SaveDesignFileRequest) error {
 
 func (w *Website) SaveDesignStaticFile(req request.SaveDesignFileRequest) error {
 	// 不能越级到上级
-	req.Path = strings.ReplaceAll(strings.ReplaceAll(req.Path, "..", ""), "\\", "/")
+	req.Path = sanitizeDesignPath(req.Path)
 	basePath := w.PublicPath + "static/" + req.Package + "/"
 	fullPath := basePath + req.Path
 

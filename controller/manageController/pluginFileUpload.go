@@ -5,7 +5,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/kataras/iris/v12"
@@ -103,9 +102,7 @@ func PluginFileUploadUpload(ctx iris.Context) {
 	}
 	defer file.Close()
 
-	info.Filename = strings.ReplaceAll(info.Filename, "..", "")
-	info.Filename = strings.ReplaceAll(info.Filename, "/", "")
-	info.Filename = strings.ReplaceAll(info.Filename, "\\", "")
+	info.Filename = sanitizeDesignFilePath(info.Filename)
 
 	ext := path.Ext(info.Filename)
 
