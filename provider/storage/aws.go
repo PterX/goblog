@@ -97,17 +97,18 @@ func (s *AwsS3Storage) sign(req *http.Request, bodyHash string) {
 	// 收集要签名的头部，按小写字母排序
 	var signedHeaders []string
 	headersMap := make(map[string]string)
-	for k := range req.Header {
-		kl := strings.ToLower(k)
-		if kl == "host" || kl == "x-amz-date" || kl == "x-amz-content-sha256" || kl == "x-amz-copy-source" {
+
+	// host 取自 req.Host（Go 中 Host 头不存储在 Header 中）
+	headersMap["host"] = req.Host
+	signedHeaders = append(signedHeaders, "host")
+
+	// x-amz-* 头部
+	for _, h := range []string{"x-amz-date", "x-amz-content-sha256", "x-amz-copy-source"} {
+		if v := req.Header.Get(h); v != "" {
+			kl := strings.ToLower(h)
+			headersMap[kl] = strings.TrimSpace(v)
 			signedHeaders = append(signedHeaders, kl)
-			headersMap[kl] = strings.TrimSpace(req.Header.Get(k))
 		}
-	}
-	// 确保 host 存在
-	if _, ok := headersMap["host"]; !ok {
-		headersMap["host"] = req.Host
-		signedHeaders = append(signedHeaders, "host")
 	}
 	sort.Strings(signedHeaders)
 
@@ -242,7 +243,7 @@ func (s *AwsS3Storage) Exists(ctx context.Context, key string) (bool, error) {
 func (s *AwsS3Storage) Move(ctx context.Context, src, dest string) error {
 	emptyHash := sha256Hex(nil)
 
-	copySource := url.PathEscape(fmt.Sprintf("/%s/%s", s.bucket, src))
+	copySource := "/" + s.bucket + "/" + url.PathEscape(src)
 
 	req, err := http.NewRequestWithContext(ctx, "PUT", s.objectURL(dest), nil)
 	if err != nil {
