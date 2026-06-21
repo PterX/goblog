@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -46,7 +47,7 @@ func GenerateRandNumber(length uint) uint {
 
 	var stringBuilder strings.Builder
 	for i := 0; uint(i) < length; i++ {
-		fmt.Fprintf(&stringBuilder, "%d", numberByteArray[mrand.Intn(numberLength)])
+		fmt.Fprintf(&stringBuilder, "%d", numberByteArray[rand.Intn(numberLength)])
 	}
 	randomNumber, _ := strconv.ParseUint(stringBuilder.String(), 10, 0)
 	return uint(randomNumber)
