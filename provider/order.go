@@ -423,7 +423,7 @@ func (w *Website) SetOrderRefund(order *model.Order, status int) error {
 			}
 
 			bm := make(gopay.BodyMap)
-			bm.Set("nonce_str", library.GenerateRandString(32)).
+			bm.Set("nonce_str", config.GenerateRandString(32)).
 				Set("out_trade_no", order.PaymentId).
 				Set("out_refund_no", refund.RefundId).
 				Set("total_fee", order.Amount).
@@ -458,7 +458,7 @@ func (w *Website) SetOrderRefund(order *model.Order, status int) error {
 			}
 
 			bm := make(gopay.BodyMap)
-			bm.Set("nonce_str", library.GenerateRandString(32)).
+			bm.Set("nonce_str", config.GenerateRandString(32)).
 				Set("out_trade_no", order.PaymentId).
 				Set("out_refund_no", refund.RefundId).
 				Set("total_fee", order.Amount).

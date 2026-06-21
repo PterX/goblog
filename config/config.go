@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	mrand "math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,18 +129,26 @@ func WriteConfig() error {
 	return nil
 }
 
+// GenerateRandString 生成随机字符串
 func GenerateRandString(length int) string {
+	const charSet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var output strings.Builder
+	output.Grow(length)
+
 	buf := make([]byte, length)
 	if _, err := rand.Read(buf); err != nil {
+		// fallback: 用当前时间作为种子
+		rd := mrand.New(mrand.NewSource(time.Now().UnixNano()))
 		for i := 0; i < length; i++ {
-			buf[i] = byte(i%26) + 97
+			output.WriteByte(charSet[rd.Intn(len(charSet))])
 		}
 	} else {
 		for i := 0; i < length; i++ {
-			buf[i] = byte(buf[i]%26) + 97
+			output.WriteByte(charSet[int(buf[i])%len(charSet)])
 		}
 	}
-	return string(buf)
+
+	return output.String()
 }
 
 func LoadLocales() (languages []string) {

@@ -2,16 +2,13 @@ package library
 
 import (
 	"crypto/md5"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"math"
-	mrand "math/rand"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var tenToAny = map[int]string{0: "0", 1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9", 10: "a", 11: "b", 12: "c", 13: "d", 14: "e", 15: "f", 16: "g", 17: "h", 18: "i", 19: "j", 20: "k", 21: "l", 22: "m", 23: "n", 24: "o", 25: "p", 26: "q", 27: "r", 28: "s", 29: "t", 30: "u", 31: "v", 32: "w", 33: "x", 34: "y", 35: "z", 37: "A", 38: "B", 39: "C", 40: "D", 41: "E", 42: "F", 43: "G", 44: "H", 45: "I", 46: "J", 47: "K", 48: "L", 49: "M", 50: "N", 51: "O", 52: "P", 53: "Q", 54: "R", 55: "S", 56: "T", 57: "U", 58: "V", 59: "W", 60: "X", 61: "Y", 62: "Z", 63: ":", 64: ";", 65: "<", 66: "=", 67: ">", 68: "?", 69: "@", 70: "[", 71: "]", 72: "^", 73: "_", 74: "{", 75: "|", 76: "}"}
@@ -53,28 +50,6 @@ func GenerateRandNumber(length uint) uint {
 	}
 	randomNumber, _ := strconv.ParseUint(stringBuilder.String(), 10, 0)
 	return uint(randomNumber)
-}
-
-// GenerateRandString 生成随机字符串
-func GenerateRandString(length int) string {
-	const charSet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	var output strings.Builder
-	output.Grow(length)
-
-	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
-		// fallback: 用当前时间作为种子
-		rd := mrand.New(mrand.NewSource(time.Now().UnixNano()))
-		for i := 0; i < length; i++ {
-			output.WriteByte(charSet[rd.Intn(len(charSet))])
-		}
-	} else {
-		for i := 0; i < length; i++ {
-			output.WriteByte(charSet[int(buf[i])%len(charSet)])
-		}
-	}
-
-	return output.String()
 }
 
 // IsMd5 验证给定的字符串是否是md5值，返回匹配的md5值或者空字符串

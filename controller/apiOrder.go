@@ -370,7 +370,7 @@ func createWechatPayment(ctx iris.Context, payment *model.Payment) {
 
 	bm := make(gopay.BodyMap)
 	bm.Set("body", payment.Remark).
-		Set("nonce_str", library.GenerateRandString(32)).
+		Set("nonce_str", config.GenerateRandString(32)).
 		Set("spbill_create_ip", ctx.RemoteAddr()).
 		Set("out_trade_no", payment.PaymentId). // 传的是paymentID，因此notify的时候，需要处理paymentID
 		Set("total_fee", payment.Amount).
@@ -433,7 +433,7 @@ func createWeappPayment(ctx iris.Context, payment *model.Payment) {
 
 	bm := make(gopay.BodyMap)
 	bm.Set("body", payment.Remark).
-		Set("nonce_str", library.GenerateRandString(32)).
+		Set("nonce_str", config.GenerateRandString(32)).
 		Set("spbill_create_ip", ctx.RemoteAddr()).
 		Set("out_trade_no", payment.PaymentId). // 传的是paymentID，因此notify的时候，需要处理paymentID
 		Set("total_fee", payment.Amount).
