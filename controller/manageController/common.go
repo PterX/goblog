@@ -4,16 +4,7 @@ import (
 	"archive/zip"
 	"encoding/json"
 	"fmt"
-	"github.com/kataras/iris/v12"
-	captcha "github.com/mojocn/base64Captcha"
-	"github.com/parnurzeal/gorequest"
 	"io"
-	"kandaoni.com/anqicms/config"
-	"kandaoni.com/anqicms/controller"
-	"kandaoni.com/anqicms/library"
-	"kandaoni.com/anqicms/model"
-	"kandaoni.com/anqicms/provider"
-	"kandaoni.com/anqicms/response"
 	"log"
 	"os"
 	"path/filepath"
@@ -21,6 +12,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kataras/iris/v12"
+	captcha "github.com/mojocn/base64Captcha"
+	"github.com/parnurzeal/gorequest"
+	"kandaoni.com/anqicms/config"
+	"kandaoni.com/anqicms/controller"
+	"kandaoni.com/anqicms/library"
+	"kandaoni.com/anqicms/model"
+	"kandaoni.com/anqicms/provider"
+	"kandaoni.com/anqicms/response"
 )
 
 func AdminFileServ(ctx iris.Context) {
@@ -41,13 +42,13 @@ func AdminFileServ(ctx iris.Context) {
 		uriFile := config.ExecPath + strings.TrimLeft(uri, "/")
 		// 防止路径遍历: 解析出真实路径后检查是否仍在允许的目录内
 		uriFile = filepath.Clean(uriFile)
-		basePath := filepath.Clean(config.ExecPath)
-		if !strings.HasPrefix(uriFile, basePath+string(filepath.Separator)) && uriFile != basePath {
+		basePath := config.ExecPath + "system"
+		if !strings.HasPrefix(uriFile, basePath) {
 			ctx.StatusCode(403)
 			return
 		}
-		_, err := os.Stat(uriFile)
-		if err == nil {
+		info, err := os.Stat(uriFile)
+		if err == nil && !info.IsDir() {
 			ctx.ServeFile(uriFile)
 			return
 		}

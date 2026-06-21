@@ -2,15 +2,15 @@ package manageController
 
 import (
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/kataras/iris/v12"
 	"github.com/kataras/iris/v12/context"
 	"kandaoni.com/anqicms/config"
 	"kandaoni.com/anqicms/provider"
 	"kandaoni.com/anqicms/request"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
 
 // sanitizePackageName 验证包名只包含安全字符
@@ -28,9 +28,7 @@ func sanitizePackageName(name string) bool {
 
 // sanitizeDesignFilePath 清理设计器文件路径，防止路径穿越
 func sanitizeDesignFilePath(filePath string) string {
-	filePath = filepath.Clean(filePath)
-	// 不允许包含路径分隔符（即必须是单一文件名）
-	if strings.Contains(filePath, "/") || strings.Contains(filePath, "\\") || strings.HasPrefix(filePath, ".") {
+	if strings.Contains(filePath, "..") {
 		return ""
 	}
 	return filePath

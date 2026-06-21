@@ -81,21 +81,36 @@ func AccountPasswordResetPage(ctx iris.Context) {
 }
 
 func AccountIndexPage(ctx iris.Context) {
+	currentSite := provider.CurrentSite(ctx)
+
 	route := ctx.Params().Get("route")
 	if route == "" {
 		route = "index"
 	}
-	// 防止路径遍历: 清理路径并检查是否包含目录分隔符或上级引用
 	route = filepath.Clean(route)
-	if strings.Contains(route, "/") || strings.Contains(route, "\\") || strings.HasPrefix(route, ".") {
-		ctx.StatusCode(404)
-		return
-	}
 	if !strings.HasSuffix(route, ".html") {
 		route += ".html"
 	}
+	tpl := "account/" + route
+	tpl = filepath.Clean(tpl)
+	if !strings.HasPrefix(tpl, "account/") {
+		ctx.StatusCode(iris.StatusNotFound)
+		return
+	}
+	tpl, ok := currentSite.TemplateExist(tpl)
+	if !ok {
+		ctx.StatusCode(iris.StatusNotFound)
+		return
+	}
+	if webInfo, ok := ctx.Value("webInfo").(*response.WebInfo); ok {
+		webInfo.Title = route
+		webInfo.PageName = "account"
+		ctx.ViewData("webInfo", webInfo)
+	}
 
-	err := ctx.View(GetViewPath(ctx, "account/"+route))
+	ctx.ViewData("currentRoute", route)
+
+	err := ctx.View(GetViewPath(ctx, tpl))
 	if err != nil {
 		ctx.StatusCode(404)
 		ctx.Values().Set("message", err.Error())

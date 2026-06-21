@@ -62,7 +62,16 @@ func CommonPage(ctx iris.Context) {
 	tplName := "common/index.html"
 	urlToken := ctx.Params().GetString("filename")
 	if urlToken != "" {
-		tplName = "common/" + urlToken + ".html"
+		urlToken = filepath.Clean(urlToken)
+		if !strings.HasSuffix(urlToken, ".html") {
+			urlToken += ".html"
+		}
+		tplName = "common/" + urlToken
+		tplName = filepath.Clean(tplName)
+		if !strings.HasPrefix(tplName, "common/") {
+			ctx.StatusCode(iris.StatusNotFound)
+			return
+		}
 	}
 	var ok bool
 	tplName, ok = currentSite.TemplateExist(tplName, "common/index.html", "common/detail.html")
@@ -356,10 +365,9 @@ func FileServe(ctx iris.Context) bool {
 		uriFile := baseDir + strings.TrimPrefix(uri, strings.TrimRight(currentSite.BaseURI, "/"))
 		// 防止路径遍历
 		uriFile = filepath.Clean(uriFile)
-		cleanBase := filepath.Clean(baseDir)
-		if strings.HasPrefix(uriFile, cleanBase+string(filepath.Separator)) || uriFile == cleanBase {
-			_, err := os.Stat(uriFile)
-			if err == nil {
+		if strings.HasPrefix(uriFile, baseDir) {
+			info, err := os.Stat(uriFile)
+			if err == nil && !info.IsDir() {
 				ctx.ServeFile(uriFile)
 				return true
 			}
@@ -371,10 +379,9 @@ func FileServe(ctx iris.Context) bool {
 				baseDir2 := mainSite.RootPath + "public"
 				uriFile2 := baseDir2 + strings.TrimPrefix(uri, strings.TrimRight(mainSite.BaseURI, "/"))
 				uriFile2 = filepath.Clean(uriFile2)
-				cleanBase2 := filepath.Clean(baseDir2)
-				if strings.HasPrefix(uriFile2, cleanBase2+string(filepath.Separator)) || uriFile2 == cleanBase2 {
-					_, err2 := os.Stat(uriFile2)
-					if err2 == nil {
+				if strings.HasPrefix(uriFile2, baseDir2) {
+					info2, err2 := os.Stat(uriFile2)
+					if err2 == nil && !info2.IsDir() {
 						ctx.ServeFile(uriFile2)
 						return true
 					}
@@ -385,9 +392,9 @@ func FileServe(ctx iris.Context) bool {
 				if strings.HasPrefix(uri, "/"+lang+"/") {
 					uriFile = baseDir + uri[len(lang)+1:]
 					uriFile = filepath.Clean(uriFile)
-					if strings.HasPrefix(uriFile, cleanBase+string(filepath.Separator)) || uriFile == cleanBase {
-						_, err3 := os.Stat(uriFile)
-						if err3 == nil {
+					if strings.HasPrefix(uriFile, baseDir) {
+						info3, err3 := os.Stat(uriFile)
+						if err3 == nil && !info3.IsDir() {
 							_ = ctx.ServeFile(uriFile)
 							return true
 						}
@@ -494,15 +501,16 @@ func ReRouteContext(ctx iris.Context) {
 					// ?_pjax=%23pjax-container
 					parsed, err := url.Parse(uri)
 					if err == nil {
-						if parsed.Query().Has("lang") {
+						query := parsed.Query()
+						if query.Has("lang") {
 							// 去掉 lang 参数
-							parsed.Query().Del("lang")
+							query.Del("lang")
 						}
-						if parsed.Query().Has("_pjax") {
+						if query.Has("_pjax") {
 							// 去掉 _pjax 参数
-							parsed.Query().Del("_pjax")
+							query.Del("_pjax")
 						}
-						parsed.RawQuery = parsed.Query().Encode()
+						parsed.RawQuery = query.Encode()
 						uri = parsed.String()
 					}
 				}

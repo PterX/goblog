@@ -58,7 +58,7 @@ func DownloadClientFile(ctx iris.Context) {
 	}
 	clientFile = filepath.Clean(clientFile)
 	basePath := filepath.Clean(config.ExecPath + "clientFiles/")
-	if !strings.HasPrefix(clientFile, basePath+string(filepath.Separator)) && clientFile != basePath {
+	if !strings.HasPrefix(clientFile, basePath) {
 		ctx.JSON(iris.Map{
 			"code": config.StatusFailed,
 			"msg":  "invalid file path",
