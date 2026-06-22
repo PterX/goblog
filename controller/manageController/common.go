@@ -2,19 +2,9 @@ package manageController
 
 import (
 	"archive/zip"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/kataras/iris/v12"
-	captcha "github.com/mojocn/base64Captcha"
-	"github.com/parnurzeal/gorequest"
 	"io"
-	"kandaoni.com/anqicms/config"
-	"kandaoni.com/anqicms/controller"
-	"kandaoni.com/anqicms/library"
-	"kandaoni.com/anqicms/model"
-	"kandaoni.com/anqicms/provider"
-	"kandaoni.com/anqicms/response"
 	"log"
 	"os"
 	"path/filepath"
@@ -22,6 +12,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kataras/iris/v12"
+	captcha "github.com/mojocn/base64Captcha"
+	"github.com/parnurzeal/gorequest"
+	"kandaoni.com/anqicms/config"
+	"kandaoni.com/anqicms/controller"
+	"kandaoni.com/anqicms/library"
+	"kandaoni.com/anqicms/model"
+	"kandaoni.com/anqicms/provider"
+	"kandaoni.com/anqicms/response"
 )
 
 func AdminFileServ(ctx iris.Context) {
@@ -40,8 +40,15 @@ func AdminFileServ(ctx iris.Context) {
 	uri := ctx.RequestPath(false)
 	if uri != "/" {
 		uriFile := config.ExecPath + strings.TrimLeft(uri, "/")
-		_, err := os.Stat(uriFile)
-		if err == nil {
+		// 防止路径遍历: 解析出真实路径后检查是否仍在允许的目录内
+		uriFile = filepath.Clean(uriFile)
+		basePath := config.ExecPath + "system"
+		if !strings.HasPrefix(uriFile, basePath) {
+			ctx.StatusCode(403)
+			return
+		}
+		info, err := os.Stat(uriFile)
+		if err == nil && !info.IsDir() {
 			ctx.ServeFile(uriFile)
 			return
 		}
@@ -120,7 +127,7 @@ func GetStatisticsDashboard(ctx iris.Context) {
 func CheckVersion(ctx iris.Context) {
 	link := "https://www.anqicms.com/downloads/version.json?goos=" + runtime.GOOS + "&goarch=" + runtime.GOARCH + "&type=" + config.VersionType
 	var lastVersion response.LastVersion
-	_, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).TLSClientConfig(&tls.Config{InsecureSkipVerify: true}).Timeout(10 * time.Second).Get(link).EndBytes()
+	_, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).Timeout(10 * time.Second).Get(link).EndBytes()
 	if errs != nil {
 		ctx.JSON(iris.Map{
 			"code": config.StatusOK,
@@ -179,7 +186,7 @@ func VersionUpgrade(ctx iris.Context) {
 		link = fmt.Sprintf("https://www.anqicms.com/downloads/anqicms-%s-%s-%s-v%s.zip", config.VersionType, runtime.GOOS, runtime.GOARCH, version)
 	}
 	// 最长等待10分钟
-	resp, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).TLSClientConfig(&tls.Config{InsecureSkipVerify: true}).Timeout(20 * time.Minute).Get(link).EndBytes()
+	resp, body, errs := gorequest.New().SetDoNotClearSuperAgent(true).Timeout(20 * time.Minute).Get(link).EndBytes()
 	if errs != nil || resp.StatusCode != 200 {
 		ctx.JSON(iris.Map{
 			"code": config.StatusFailed,

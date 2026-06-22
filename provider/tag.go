@@ -401,10 +401,9 @@ func (w *Website) GetTagsByItemIds(itemIds []int64) map[int64][]*model.Tag {
 		for _, datum := range tagData {
 			if datum.TagId == tag.Id {
 				tag.ItemId = datum.ItemId
-				break
+				result[datum.ItemId] = append(result[datum.ItemId], tag)
 			}
 		}
-		result[tag.ItemId] = append(result[tag.ItemId], tag)
 	}
 
 	return result

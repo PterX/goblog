@@ -47,6 +47,15 @@ func ParseUserToken(ctx iris.Context) {
 					id, _ := strconv.Atoi(userID)
 					userInfo, err := currentSite.GetUserInfoById(uint(id))
 					if err == nil {
+						// 账号状态判断
+						if userInfo.Status != config.UserStatusActive {
+							// 账号被禁用
+							ctx.JSON(iris.Map{
+								"code": config.StatusNoLogin,
+								"msg":  ctx.Tr("ThisAccountHasBeenDisabled"),
+							})
+							return
+						}
 						ctx.Values().Set("userId", userID)
 						ctx.Values().Set("userInfo", userInfo)
 

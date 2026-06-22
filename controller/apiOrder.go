@@ -370,13 +370,13 @@ func createWechatPayment(ctx iris.Context, payment *model.Payment) {
 
 	bm := make(gopay.BodyMap)
 	bm.Set("body", payment.Remark).
-		Set("nonce_str", library.GenerateRandString(32)).
+		Set("nonce_str", config.GenerateRandString(32)).
 		Set("spbill_create_ip", ctx.RemoteAddr()).
 		Set("out_trade_no", payment.PaymentId). // 传的是paymentID，因此notify的时候，需要处理paymentID
 		Set("total_fee", payment.Amount).
 		Set("trade_type", wechat.TradeType_Native).
 		Set("notify_url", currentSite.System.BaseUrl+"/notify/wechat/pay").
-		Set("sign_type", wechat.SignType_MD5)
+		Set("sign_type", wechat.SignType_HMAC_SHA256)
 
 	wxRsp, err := client.UnifiedOrder(context.Background(), bm)
 	if err != nil {
@@ -433,13 +433,13 @@ func createWeappPayment(ctx iris.Context, payment *model.Payment) {
 
 	bm := make(gopay.BodyMap)
 	bm.Set("body", payment.Remark).
-		Set("nonce_str", library.GenerateRandString(32)).
+		Set("nonce_str", config.GenerateRandString(32)).
 		Set("spbill_create_ip", ctx.RemoteAddr()).
 		Set("out_trade_no", payment.PaymentId). // 传的是paymentID，因此notify的时候，需要处理paymentID
 		Set("total_fee", payment.Amount).
 		Set("trade_type", wechat.TradeType_Mini).
 		Set("notify_url", currentSite.System.BaseUrl+"/notify/wechat/pay").
-		Set("sign_type", wechat.SignType_MD5).
+		Set("sign_type", wechat.SignType_HMAC_SHA256).
 		Set("openid", userWechat.Openid)
 
 	wxRsp, err := client.UnifiedOrder(context.Background(), bm)
@@ -470,7 +470,7 @@ func createWeappPayment(ctx iris.Context, payment *model.Payment) {
 	// 微信小程序支付需要 paySign
 	timeStamp := strconv.FormatInt(time.Now().Unix(), 10)
 	packages := "prepay_id=" + wxRsp.PrepayId
-	paySign := wechat.GetMiniPaySign(currentSite.PluginPay.WeappAppId, wxRsp.NonceStr, packages, wechat.SignType_MD5, timeStamp, currentSite.PluginPay.WechatApiKey)
+	paySign := wechat.GetMiniPaySign(currentSite.PluginPay.WeappAppId, wxRsp.NonceStr, packages, wechat.SignType_HMAC_SHA256, timeStamp, currentSite.PluginPay.WechatApiKey)
 
 	ctx.JSON(iris.Map{
 		"code": config.StatusOK,
@@ -481,7 +481,7 @@ func createWeappPayment(ctx iris.Context, payment *model.Payment) {
 			"timeStamp": timeStamp,
 			"package":   packages,
 			"nonceStr":  wxRsp.NonceStr,
-			"signType":  wechat.SignType_MD5,
+			"signType":  wechat.SignType_HMAC_SHA256,
 		},
 	})
 	return

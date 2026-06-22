@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -61,7 +62,16 @@ func CommonPage(ctx iris.Context) {
 	tplName := "common/index.html"
 	urlToken := ctx.Params().GetString("filename")
 	if urlToken != "" {
-		tplName = "common/" + urlToken + ".html"
+		urlToken = filepath.Clean(urlToken)
+		if !strings.HasSuffix(urlToken, ".html") {
+			urlToken += ".html"
+		}
+		tplName = "common/" + urlToken
+		tplName = filepath.Clean(tplName)
+		if !strings.HasPrefix(tplName, "common/") {
+			ctx.StatusCode(iris.StatusNotFound)
+			return
+		}
 	}
 	var ok bool
 	tplName, ok = currentSite.TemplateExist(tplName, "common/index.html", "common/detail.html")
@@ -353,10 +363,14 @@ func FileServe(ctx iris.Context) bool {
 	if uri != currentSite.BaseURI && !strings.HasSuffix(uri, "/") {
 		baseDir := currentSite.RootPath + "public"
 		uriFile := baseDir + strings.TrimPrefix(uri, strings.TrimRight(currentSite.BaseURI, "/"))
-		_, err := os.Stat(uriFile)
-		if err == nil {
-			ctx.ServeFile(uriFile)
-			return true
+		// 防止路径遍历
+		uriFile = filepath.Clean(uriFile)
+		if strings.HasPrefix(uriFile, baseDir) {
+			info, err := os.Stat(uriFile)
+			if err == nil && !info.IsDir() {
+				ctx.ServeFile(uriFile)
+				return true
+			}
 		}
 		// 多语言站点目录支持
 		mainSite := currentSite.GetMainWebsite()
@@ -364,20 +378,26 @@ func FileServe(ctx iris.Context) bool {
 			if mainSite.MultiLanguage.Type == config.MultiLangTypeSame {
 				baseDir2 := mainSite.RootPath + "public"
 				uriFile2 := baseDir2 + strings.TrimPrefix(uri, strings.TrimRight(mainSite.BaseURI, "/"))
-				_, err = os.Stat(uriFile2)
-				if err == nil {
-					ctx.ServeFile(uriFile2)
-					return true
+				uriFile2 = filepath.Clean(uriFile2)
+				if strings.HasPrefix(uriFile2, baseDir2) {
+					info2, err2 := os.Stat(uriFile2)
+					if err2 == nil && !info2.IsDir() {
+						ctx.ServeFile(uriFile2)
+						return true
+					}
 				}
 			}
 			for i := range mainSite.MultiLanguage.SubSites {
 				lang := mainSite.MultiLanguage.SubSites[i].Language
 				if strings.HasPrefix(uri, "/"+lang+"/") {
 					uriFile = baseDir + uri[len(lang)+1:]
-					_, err = os.Stat(uriFile)
-					if err == nil {
-						_ = ctx.ServeFile(uriFile)
-						return true
+					uriFile = filepath.Clean(uriFile)
+					if strings.HasPrefix(uriFile, baseDir) {
+						info3, err3 := os.Stat(uriFile)
+						if err3 == nil && !info3.IsDir() {
+							_ = ctx.ServeFile(uriFile)
+							return true
+						}
 					}
 					break
 				}
@@ -454,7 +474,10 @@ func ReRouteContext(ctx iris.Context) {
 			// 解析当前站点的语言
 			var langSite *config.MultiLangSite
 			if mainSite.MultiLanguage.Type == config.MultiLangTypeDomain {
-				langSite = mainSite.MultiLanguage.GetSiteByBaseUrl(library.GetHost(ctx))
+				curHost := library.GetHost(ctx)
+				if curHost != mainSite.Host {
+					langSite = mainSite.MultiLanguage.GetSiteByBaseUrl(curHost)
+				}
 			} else {
 				var lang string
 				if mainSite.MultiLanguage.Type == config.MultiLangTypeDirectory {
@@ -481,15 +504,16 @@ func ReRouteContext(ctx iris.Context) {
 					// ?_pjax=%23pjax-container
 					parsed, err := url.Parse(uri)
 					if err == nil {
-						if parsed.Query().Has("lang") {
+						query := parsed.Query()
+						if query.Has("lang") {
 							// 去掉 lang 参数
-							parsed.Query().Del("lang")
+							query.Del("lang")
 						}
-						if parsed.Query().Has("_pjax") {
+						if query.Has("_pjax") {
 							// 去掉 _pjax 参数
-							parsed.Query().Del("_pjax")
+							query.Del("_pjax")
 						}
-						parsed.RawQuery = parsed.Query().Encode()
+						parsed.RawQuery = query.Encode()
 						uri = parsed.String()
 					}
 				}

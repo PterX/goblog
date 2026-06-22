@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"log"
 	"mime/multipart"
 	"regexp"
@@ -14,11 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/api/oauth2/v2"
-	"google.golang.org/api/option"
-
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/medivhzhan/weapp/v3"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/image/webp"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -683,36 +682,51 @@ func (w *Website) LoginViaGoogle(req *request.ApiLoginRequest) (*model.User, err
 		log.Println(err)
 		return nil, err
 	}
+	// 用 REST API 获取用户信息，替代 google.golang.org/api/oauth2/v2
 	client := googleCfg.Client(ctx, tok)
-	oauth2Service, err := oauth2.NewService(context.Background(), option.WithHTTPClient(client))
-	userInfo, err := oauth2Service.Userinfo.Get().Do()
+	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	var googleUser GoogleUser
+	if err := json.Unmarshal(body, &googleUser); err != nil {
+		log.Println(err)
+		return nil, err
+	}
 	// 直接对接 users 表的 email
-	user, err := w.GetUserInfoByEmail(userInfo.Email)
+	user, err := w.GetUserInfoByEmail(googleUser.Email)
 	if err != nil {
 		// 用户不存在，新建
 		user = &model.User{
-			Email:         userInfo.Email,
-			EmailVerified: *userInfo.VerifiedEmail,
-			UserName:      userInfo.Name,
-			AvatarURL:     userInfo.Picture,
-			GoogleId:      userInfo.Id,
+			Email:         googleUser.Email,
+			EmailVerified: googleUser.EmailVerified,
+			UserName:      googleUser.Name,
+			AvatarURL:     googleUser.Picture,
+			GoogleId:      googleUser.Sub,
 			GroupId:       w.PluginUser.DefaultGroupId,
 			Password:      "",
 			ResetPassword: true,
 			Status:        w.PluginUser.GetDefaultStatus(),
 		}
-		if userInfo.GivenName != "" {
-			user.RealName = userInfo.GivenName + " " + userInfo.FamilyName
+		if googleUser.GivenName != "" {
+			user.RealName = googleUser.GivenName + " " + googleUser.FamilyName
 		}
 		w.DB.Save(user)
 	} else {
-		user.GoogleId = userInfo.Id
-		user.UserName = userInfo.Name
-		if userInfo.GivenName != "" {
-			user.RealName = userInfo.GivenName + " " + userInfo.FamilyName
+		user.GoogleId = googleUser.Sub
+		user.UserName = googleUser.Name
+		if googleUser.GivenName != "" {
+			user.RealName = googleUser.GivenName + " " + googleUser.FamilyName
 		}
 		if user.AvatarURL == "" {
-			user.AvatarURL = userInfo.Picture
+			user.AvatarURL = googleUser.Picture
 		}
 		w.DB.Save(user)
 	}
@@ -752,6 +766,13 @@ func (w *Website) LoginViaPassword(req *request.ApiLoginRequest) (*model.User, e
 	ok := user.CheckPassword(req.Password)
 	if !ok {
 		return nil, errors.New(w.Tr("WrongPassword"))
+	}
+
+	// 密码成本因子升级：旧密码使用低成本因子时自动升级
+	cost, _ := bcrypt.Cost([]byte(user.Password))
+	if cost < model.BcryptCost {
+		user.EncryptPassword(req.Password)
+		w.DB.Model(&user).UpdateColumn("password", user.Password)
 	}
 
 	user.Token = w.GetUserAuthToken(user.Id, true)

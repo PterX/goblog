@@ -37,7 +37,7 @@ func ArchiveList(ctx iris.Context) {
 		sort = "id"
 	}
 	sort = "archives." + sort
-	orderBy := sort + " " + order
+	orderBy := provider.ParseOrderBy(sort+" "+order, "archives")
 	// 回收站
 	recycle, _ := ctx.URLParamBool("recycle")
 	if recycle {

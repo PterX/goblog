@@ -243,6 +243,17 @@ func SkillDelete(ctx iris.Context) {
 		return
 	}
 
+	// Validate name (only allow safe characters)
+	for _, c := range req.Name {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			ctx.JSON(iris.Map{
+				"code": -1,
+				"msg":  "name只能包含字母、数字、中划线和下划线",
+			})
+			return
+		}
+	}
+
 	skillDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "skills", req.Name)
 	if _, err := os.Stat(skillDir); os.IsNotExist(err) {
 		ctx.JSON(iris.Map{

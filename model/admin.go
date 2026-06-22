@@ -9,6 +9,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const BcryptCost = 12
+
 type Admin struct {
 	Id          uint        `json:"id" gorm:"column:id;type:int(10) unsigned not null AUTO_INCREMENT;primaryKey"`
 	CreatedTime int64       `json:"created_time" gorm:"column:created_time;type:int(11);autoCreateTime;index:idx_created_time"`
@@ -67,7 +69,7 @@ type AdminLoginLog struct {
 	Ip          string `json:"ip" gorm:"column:ip;type:varchar(32) not null;default:''"`
 	Status      uint   `json:"status" gorm:"column:status;type:tinyint(1) unsigned not null;default:0"`
 	UserName    string `json:"user_name" gorm:"column:user_name;type:varchar(32) not null;default:''"`
-	Password    string `json:"password" gorm:"column:password;type:varchar(128) not null;default:''"`
+	Password    string `json:"-" gorm:"column:password;type:varchar(128) not null;default:''"`
 }
 
 type AdminLog struct {
@@ -100,7 +102,7 @@ func (admin *Admin) EncryptPassword(password string) error {
 		return errors.New("密码为空")
 	}
 	pass := []byte(password)
-	hash, err := bcrypt.GenerateFromPassword(pass, bcrypt.MinCost)
+	hash, err := bcrypt.GenerateFromPassword(pass, BcryptCost)
 	if err != nil {
 		return err
 	}
