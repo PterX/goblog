@@ -474,7 +474,10 @@ func ReRouteContext(ctx iris.Context) {
 			// 解析当前站点的语言
 			var langSite *config.MultiLangSite
 			if mainSite.MultiLanguage.Type == config.MultiLangTypeDomain {
-				langSite = mainSite.MultiLanguage.GetSiteByBaseUrl(library.GetHost(ctx))
+				curHost := library.GetHost(ctx)
+				if curHost != mainSite.Host {
+					langSite = mainSite.MultiLanguage.GetSiteByBaseUrl(curHost)
+				}
 			} else {
 				var lang string
 				if mainSite.MultiLanguage.Type == config.MultiLangTypeDirectory {

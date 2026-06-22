@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"strings"
 	"sync"
 )
@@ -340,7 +341,11 @@ func (pm *PluginMultiLangConfig) GetSite(lang string) *MultiLangSite {
 
 func (pm *PluginMultiLangConfig) GetSiteByBaseUrl(baseUrl string) *MultiLangSite {
 	for i := range pm.SubSites {
-		if strings.Contains(pm.SubSites[i].BaseUrl, baseUrl) {
+		subUrl, err := url.Parse(pm.SubSites[i].BaseUrl)
+		if err != nil {
+			continue
+		}
+		if subUrl.Host == baseUrl {
 			return &pm.SubSites[i]
 		}
 	}
