@@ -110,6 +110,14 @@ func AiChat(ctx iris.Context) {
 		writer.Flush()
 		return
 	}
+	// 接受配置信息提示
+	if req.Message == "/config" || req.Message == "/设置" {
+		// 显示配置信息
+		sendSSEWarning(writer, "请将以上 JSON 配置（替换为你自己的 api_key）作为消息内容发送以完成配置")
+		fmt.Fprintf(writer, "event: config\ndata: %s\n\n", template)
+		writer.Flush()
+		return
+	}
 
 	// ── Step 1: 接收与诊断 ──
 	// 负面反馈检测: 如果用户消息较短且包含负面关键词，标记为不满
