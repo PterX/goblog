@@ -1,6 +1,25 @@
 # 更新日志
 
-## v3.5.10 `AnQiCMS` `2026-06-12`
+## v3.6.1 `AnQiCMS` `2026-06-19`
+
+### ⚡ 性能优化
+
+- **📦 二进制体积缩减 50%**：通过替换重型 SDK 为原生 HTTP 调用，大幅缩减程序体积（103 MB → 51 MB），降低分发和部署成本。
+  - **Elasticsearch 客户端**：移除 `typedapi`（715 个 package），改用裸 HTTP 调用 ES REST API。
+  - **Google API 客户端集**：移除 `google.golang.org/api`、`cloud.google.com/go/storage` 及 `google.golang.org/grpc` 等全套间接依赖，改用 REST API + OAuth2 JWT 认证。
+  - **AWS SDK v2**：移除 `aws-sdk-go-v2` 全套（90 个 package），改用裸 HTTP + SigV4 签名直接调用 S3 REST API，同时覆盖 Cloudflare R2 兼容存储。
+  - **Google OAuth 登录**：移除 `google.golang.org/api/oauth2/v2`，改用裸 HTTP 请求。
+
+### 🌐 多语言与 SEO
+
+- **多语言顶级域名支持**：多语言站点支持使用顶级域名作为独立站点域名。
+- **Sitemap 优化**：调整 Sitemap 生成逻辑，更符合 Google 对 XML Sitemap 的格式要求。
+
+### 🐛 问题修复
+
+- **路径穿越漏洞修复**：`provider/design.go` 中路径穿越黑名单替换为白名单，增强模板操作安全性。
+- **AI 配置弹窗**：增加 AI 配置弹窗，方便在 AI 对话中直接切换配置。
+- **安全增强**：`GenerateRandString` 逻辑更新，提升随机字符串安全性。
 
 ### ✨ 新增功能
 
