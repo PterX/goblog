@@ -15,8 +15,8 @@ type Archive struct {
 	//默认字段
 	Id           int64          `json:"id" gorm:"column:id;type:bigint(20) not null AUTO_INCREMENT;primaryKey"`
 	ParentId     int64          `json:"parent_id" gorm:"column:parent_id;type:bigint(20) not null;default:0;index"`
-	CreatedTime  int64          `json:"created_time" gorm:"column:created_time;type:int(11);autoCreateTime;index:idx_created_time;index:idx_category_created_time,priority:2;index:idx_module_created_time,priority:2"`
-	UpdatedTime  int64          `json:"updated_time" gorm:"column:updated_time;type:int(11);autoUpdateTime;index:idx_updated_time"`
+	CreatedTime  int64          `json:"created_time" gorm:"column:created_time;type:bigint(20);autoCreateTime;index:idx_created_time;index:idx_category_created_time,priority:2;index:idx_module_created_time,priority:2"`
+	UpdatedTime  int64          `json:"updated_time" gorm:"column:updated_time;type:bigint(20);autoUpdateTime;index:idx_updated_time"`
 	Title        string         `json:"title" gorm:"column:title;type:varchar(190) not null;default:'';index"`
 	SeoTitle     string         `json:"seo_title" gorm:"column:seo_title;type:varchar(250) not null;default:''"`
 	UrlToken     string         `json:"url_token" gorm:"column:url_token;type:varchar(190) not null;default:'';index"`

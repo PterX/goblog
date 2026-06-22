@@ -8,7 +8,7 @@ import (
 // StatisticLog * 每天浏览量
 type StatisticLog struct {
 	Id          uint        `json:"id" gorm:"column:id;type:int(10) unsigned not null AUTO_INCREMENT;primaryKey"`
-	CreatedTime int64       `json:"created_time" gorm:"column:created_time;type:int(11);unique"`
+	CreatedTime int64       `json:"created_time" gorm:"column:created_time;type:bigint(20);unique"`
 	SpiderCount SpiderCount `json:"spider_count" gorm:"column:spider_count;type:varchar(250) default null"`
 	VisitCount  VisitCount  `json:"visit_count" gorm:"column:visit_count;type:varchar(250) default null"`
 }
