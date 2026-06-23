@@ -22,7 +22,7 @@ func OrderIndexPage(ctx iris.Context) {
 	}
 	tpl := "order/" + route
 	tpl = filepath.Clean(tpl)
-	if !strings.HasPrefix(tpl, "order/") {
+	if !strings.HasPrefix(tpl, "order") {
 		ctx.StatusCode(iris.StatusNotFound)
 		return
 	}

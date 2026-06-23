@@ -68,7 +68,7 @@ func CommonPage(ctx iris.Context) {
 		}
 		tplName = "common/" + urlToken
 		tplName = filepath.Clean(tplName)
-		if !strings.HasPrefix(tplName, "common/") {
+		if !strings.HasPrefix(tplName, "common") {
 			ctx.StatusCode(iris.StatusNotFound)
 			return
 		}

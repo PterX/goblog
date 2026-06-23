@@ -93,7 +93,7 @@ func AccountIndexPage(ctx iris.Context) {
 	}
 	tpl := "account/" + route
 	tpl = filepath.Clean(tpl)
-	if !strings.HasPrefix(tpl, "account/") {
+	if !strings.HasPrefix(tpl, "account") {
 		ctx.StatusCode(iris.StatusNotFound)
 		return
 	}
