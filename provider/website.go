@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -318,10 +319,11 @@ func InitWebsite(mw *model.Website) {
 			mw.Mysql.Host = config.Server.Mysql.Host
 			mw.Mysql.Port = config.Server.Mysql.Port
 		}
+		mw.RootPath = filepath.Clean(mw.RootPath)
 		db, err = InitDB(&mw.Mysql)
 	}
-	if !strings.HasSuffix(mw.RootPath, "/") {
-		mw.RootPath = mw.RootPath + "/"
+	if !strings.HasSuffix(mw.RootPath, string(filepath.Separator)) {
+		mw.RootPath = mw.RootPath + string(filepath.Separator)
 	}
 	if mw.Id > 0 && mw.TokenSecret == "" {
 		mw.TokenSecret = config.GenerateRandString(32)
@@ -344,9 +346,9 @@ func InitWebsite(mw *model.Website) {
 		Scheme:       "http",
 		BaseURI:      "/",
 		RootPath:     mw.RootPath,
-		CachePath:    mw.RootPath + "cache/",
-		DataPath:     mw.RootPath + "data/",
-		PublicPath:   mw.RootPath + "public/",
+		CachePath:    mw.RootPath + "cache" + string(filepath.Separator),
+		DataPath:     mw.RootPath + "data" + string(filepath.Separator),
+		PublicPath:   mw.RootPath + "public" + string(filepath.Separator),
 		backLanguage: lang,
 		Template: &StoreTemplates{
 			Templates: make(map[string]int64),
@@ -446,9 +448,9 @@ func createDefaultWebsite(ctx iris.Context) *Website {
 		Initialed:  false,
 		BaseURI:    "/",
 		RootPath:   config.ExecPath,
-		CachePath:  config.ExecPath + "cache/",
-		DataPath:   config.ExecPath + "data/",
-		PublicPath: config.ExecPath + "public/",
+		CachePath:  config.ExecPath + "cache" + string(filepath.Separator),
+		DataPath:   config.ExecPath + "data" + string(filepath.Separator),
+		PublicPath: config.ExecPath + "public" + string(filepath.Separator),
 		System: &config.SystemConfig{
 			SiteName:     "AnQiCMS",
 			TemplateName: "default",
@@ -714,9 +716,9 @@ func CurrentSite2(ctx iris.Context) *Website {
 			Initialed:  false,
 			BaseURI:    "/",
 			RootPath:   config.ExecPath,
-			CachePath:  config.ExecPath + "cache/",
-			DataPath:   config.ExecPath + "data/",
-			PublicPath: config.ExecPath + "public/",
+			CachePath:  config.ExecPath + "cache" + string(filepath.Separator),
+			DataPath:   config.ExecPath + "data" + string(filepath.Separator),
+			PublicPath: config.ExecPath + "public" + string(filepath.Separator),
 			System: &config.SystemConfig{
 				SiteName:     "AnQiCMS",
 				TemplateName: "default",
@@ -973,12 +975,12 @@ func RemoveWebsite(siteId uint, removeFile bool) {
 
 func (w *Website) GetTemplateDir() string {
 	if w == nil {
-		return config.ExecPath + "template/default"
+		return config.ExecPath + "template" + string(filepath.Separator) + "default"
 	}
 	if len(w.System.TemplateName) == 0 {
 		w.System.TemplateName = "default"
 	}
-	return w.RootPath + "template/" + w.System.TemplateName
+	return w.RootPath + "template" + string(filepath.Separator) + w.System.TemplateName
 }
 
 func GetDBWebsites(name, baseUrl string, page, pageSize int) ([]*model.Website, int64) {

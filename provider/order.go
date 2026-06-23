@@ -365,10 +365,16 @@ func (w *Website) SetOrderFinished(order *model.Order) error {
 			}
 			var group model.UserGroup
 			err = tx.Model(model.UserGroup{}).Where("`id` = ?", orderDetail.GoodsId).Take(&group).Error
-			if err != nil {
+			if err != nil || group.Setting.ExpireDay == 0 {
 				group.Setting.ExpireDay = 365
 			}
-			startTime += int64(group.Setting.ExpireDay) * 86400
+			if group.Setting.ExpireDay == 365 {
+				startTime = time.Unix(startTime, 0).AddDate(1*orderDetail.Quantity, 0, 0).Unix()
+			} else if group.Setting.ExpireDay == 30 {
+				startTime = time.Unix(startTime, 0).AddDate(0, 1*orderDetail.Quantity, 0).Unix()
+			} else {
+				startTime += int64(group.Setting.ExpireDay*orderDetail.Quantity) * 86400
+			}
 
 			user.ExpireTime = startTime
 			user.GroupId = group.Id

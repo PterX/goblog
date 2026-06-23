@@ -883,9 +883,9 @@ func (w *Website) SaveDesignFile(req request.SaveDesignFileRequest) error {
 	// 先检查文件是否存在
 	var basePath string
 	if req.Type == "static" {
-		basePath = w.PublicPath + "static/" + designInfo.Package + "/"
+		basePath = w.PublicPath + "static" + string(filepath.Separator) + designInfo.Package + string(filepath.Separator)
 	} else {
-		basePath = w.RootPath + "template/" + designInfo.Package + "/"
+		basePath = w.RootPath + "template" + string(filepath.Separator) + designInfo.Package + string(filepath.Separator)
 	}
 	fullPath := basePath + req.Path
 	fullPath = filepath.Clean(fullPath)
@@ -994,9 +994,9 @@ func (w *Website) CopyDesignFile(req request.CopyDesignFileRequest) error {
 	// 先检查文件是否存在
 	var basePath string
 	if req.Type == "static" {
-		basePath = w.PublicPath + "static/" + req.Package + "/"
+		basePath = w.PublicPath + "static" + string(filepath.Separator) + req.Package + string(filepath.Separator)
 	} else {
-		basePath = w.RootPath + "template/" + req.Package + "/"
+		basePath = w.RootPath + "template" + string(filepath.Separator) + req.Package + string(filepath.Separator)
 	}
 	fullPath := basePath + req.Path
 	fullPath = filepath.Clean(fullPath)
@@ -1108,7 +1108,7 @@ func (w *Website) writeDesignInfo(designInfo *response.DesignPackage) error {
 
 func (w *Website) SaveDesignTplFile(req request.SaveDesignFileRequest) error {
 	// 不能越级到上级
-	basePath := w.RootPath + "template/" + req.Package + "/"
+	basePath := w.RootPath + "template" + string(filepath.Separator) + req.Package + string(filepath.Separator)
 	fullPath := basePath + req.Path
 	fullPath = filepath.Clean(fullPath)
 	if !strings.HasPrefix(fullPath, basePath) {
@@ -1152,7 +1152,7 @@ func (w *Website) SaveDesignTplFile(req request.SaveDesignFileRequest) error {
 
 func (w *Website) SaveDesignStaticFile(req request.SaveDesignFileRequest) error {
 	// 不能越级到上级
-	basePath := w.PublicPath + "static/" + req.Package + "/"
+	basePath := w.PublicPath + "static" + string(filepath.Separator) + req.Package + string(filepath.Separator)
 	fullPath := basePath + req.Path
 	fullPath = filepath.Clean(fullPath)
 	if !strings.HasPrefix(fullPath, basePath) {
