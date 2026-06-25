@@ -2,11 +2,14 @@ package storage
 
 import (
 	"context"
-	"github.com/tencentyun/cos-go-sdk-v5"
 	"io"
-	"kandaoni.com/anqicms/config"
+	"mime"
 	"net/http"
 	"net/url"
+	"path"
+
+	"github.com/tencentyun/cos-go-sdk-v5"
+	"kandaoni.com/anqicms/config"
 )
 
 type TencentStorage struct {
@@ -30,7 +33,12 @@ func NewTencentStorage(cfg *config.PluginStorageConfig) (*TencentStorage, error)
 }
 
 func (s *TencentStorage) Put(ctx context.Context, key string, r io.Reader) error {
-	_, err := s.client.Object.Put(context.Background(), key, r, nil)
+	// 根据文件后缀设置ContentType
+	contentType := mime.TypeByExtension(path.Ext(key))
+	_, err := s.client.Object.Put(context.Background(), key, r, &cos.ObjectPutOptions{
+		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
+			ContentType: contentType,
+		}})
 	if err != nil {
 		return err
 	}

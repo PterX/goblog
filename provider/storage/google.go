@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 
 	"golang.org/x/oauth2/google"
@@ -44,7 +46,7 @@ func (s *GoogleStorage) Put(ctx context.Context, key string, r io.Reader) error 
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Type", mime.TypeByExtension(path.Ext(key)))
 
 	resp, err := s.httpCli.Do(req)
 	if err != nil {

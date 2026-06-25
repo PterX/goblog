@@ -50,7 +50,7 @@ func (w *Website) UploadFile(location string, r io.Reader) (string, error) {
 		return "", err
 	}
 	// todo
-	if w.PluginStorage.KeepLocal && w.PluginStorage.StorageType != config.StorageTypeLocal || 1 == 1 {
+	if w.PluginStorage.KeepLocal && w.PluginStorage.StorageType != config.StorageTypeLocal {
 		var uploadReader io.Reader
 		//将文件写入本地
 		if seeker, ok := r.(io.Seeker); ok {
