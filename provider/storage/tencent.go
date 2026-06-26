@@ -71,7 +71,10 @@ func (s *TencentStorage) Exists(ctx context.Context, key string) (bool, error) {
 }
 
 func (s *TencentStorage) Move(ctx context.Context, src, dest string) error {
-	_, _, err := s.client.Object.Copy(ctx, dest, src, nil)
+	// sourceURL 格式: sourcebucket-appid.cos.region.myqcloud.com/sourcekey
+	// 不能包含 http:// 或 https:// 前缀
+	sourceURL := s.client.BaseURL.BucketURL.Host + "/" + src
+	_, _, err := s.client.Object.Copy(ctx, dest, sourceURL, nil)
 	if err != nil {
 		return err
 	}
