@@ -1,8 +1,9 @@
 package middleware
 
 import (
-	"github.com/kataras/iris/v12"
 	"strings"
+
+	"github.com/kataras/iris/v12"
 )
 
 func Cors(ctx iris.Context) {

@@ -49,6 +49,9 @@ func GetDesignList(ctx iris.Context) {
 func GetDesignInfo(ctx iris.Context) {
 	currentSite := provider.CurrentSubSite(ctx)
 	packageName := ctx.URLParam("package")
+	if packageName == "" {
+		packageName = currentSite.System.TemplateName
+	}
 	if !sanitizePackageName(packageName) {
 		ctx.JSON(iris.Map{
 			"code": config.StatusFailed,
@@ -56,7 +59,6 @@ func GetDesignInfo(ctx iris.Context) {
 		})
 		return
 	}
-
 	designInfo, err := currentSite.GetDesignInfo(packageName, true)
 	if err != nil {
 		ctx.JSON(iris.Map{

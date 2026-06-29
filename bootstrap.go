@@ -34,6 +34,11 @@ func New(port int, loggerLevel string) *Bootstrap {
 	var bootstrap Bootstrap
 	bootstrap.Port = port
 	bootstrap.LoggerLevel = loggerLevel
+	if loggerLevel == "error" {
+		slog.SetLogLoggerLevel(slog.LevelError)
+	} else {
+		slog.SetLogLoggerLevel(slog.LevelDebug)
+	}
 
 	return &bootstrap
 }

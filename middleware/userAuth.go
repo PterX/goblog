@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,6 +24,13 @@ func ParseUserToken(ctx iris.Context) {
 
 	currentSite := provider.CurrentSite(ctx)
 	tokenString := ctx.GetHeader("token")
+	if tokenString == "" {
+		// 兼容 OpenAI Authorization: Bearer <token>
+		auth := ctx.GetHeader("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			tokenString = strings.TrimPrefix(auth, "Bearer ")
+		}
+	}
 	if tokenString == "" {
 		// read from cookies
 		tokenString = ctx.GetCookie("token")

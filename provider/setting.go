@@ -131,7 +131,6 @@ func (w *Website) InitSetting() {
 	w.LoadTranslateSetting(settingMap[TranslateSettingKey])
 	w.LoadJsonLdSetting(settingMap[JsonLdSettingKey])
 	w.LoadLLMsSetting(settingMap[LLMsSettingKey])
-	w.LoadAiSetting(settingMap[AiSettingKey])
 	w.LoadPlaceSetting(settingMap[PlaceSettingKey])
 	// 检查OpenAIAPI是否可用
 	go w.CheckOpenAIAPIValid()
@@ -521,6 +520,9 @@ func (w *Website) LoadHtmlCacheSetting(value string) {
 }
 
 func (w *Website) LoadAnqiUser(value string) {
+	if w.Id != 1 {
+		return
+	}
 	if value != "" {
 		_ = json.Unmarshal([]byte(value), &config.AnqiUser)
 	}
@@ -782,18 +784,52 @@ func (w *Website) LoadLLMsSetting(value string) {
 	return
 }
 
-func (w *Website) LoadAiSetting(value string) {
-	var setting eino.Config
-
-	if err := json.Unmarshal([]byte(value), &setting); err != nil {
-		return
+func (w *Website) LoadAiSetting(value string) *eino.Configs {
+	var settings eino.Configs
+	if w.Id != 1 {
+		return &settings
 	}
 
-	if err := eino.SetGlobalConfig(&setting); err != nil {
-		slog.Error("Failed to initialize AI client", "error", err)
+	if w.Cache.Get("ai_setting", &settings) == nil {
+		return &settings
+	}
+
+	if value == "" {
+		value = w.GetSettingValue(AiSettingKey)
+	}
+	if err := json.Unmarshal([]byte(value), &settings); err != nil {
+		return &settings
+	}
+	// 设置默认模型
+	if len(settings.Configs) > 0 {
+		var cfg *eino.Config
+		if settings.LastModel != "" {
+			for _, v := range settings.Configs {
+				if v.Model == settings.LastModel {
+					cfg = v
+					break
+				}
+			}
+		}
+		if cfg == nil {
+			cfg = settings.Configs[0]
+		}
+		if err := eino.SetGlobalConfig(cfg); err != nil {
+			slog.Error("Failed to initialize AI client", "error", err)
+		} else {
+			slog.Info("AI client initialized successfully")
+		}
 	} else {
-		slog.Info("AI client initialized successfully")
+		// 使用官方默认的模型
+		if err := eino.SetOfficialConfig(settings.LastModel); err != nil {
+			slog.Error("Failed to initialize AI client", "error", err)
+		} else {
+			slog.Info("AI client initialized successfully")
+		}
 	}
+
+	w.Cache.Set("ai_setting", settings, 86400)
+	return &settings
 }
 
 func (w *Website) LoadPlaceSetting(value string) {

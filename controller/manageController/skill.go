@@ -39,7 +39,11 @@ type SkillDetailResponse struct {
 
 // SkillList returns all available skills
 func SkillList(ctx iris.Context) {
+	currentSite := provider.CurrentSubSite(ctx)
 	backend := provider.GetSkillBackend()
+	if currentSite != nil {
+		backend = provider.GetSkillBackendForSite(currentSite.RootPath)
+	}
 	list, err := backend.List(context.Background())
 	if err != nil {
 		ctx.JSON(iris.Map{
@@ -91,7 +95,11 @@ func SkillDetail(ctx iris.Context) {
 		return
 	}
 
+	currentSite := provider.CurrentSubSite(ctx)
 	backend := provider.GetSkillBackend()
+	if currentSite != nil {
+		backend = provider.GetSkillBackendForSite(currentSite.RootPath)
+	}
 	skill, err := backend.Get(context.Background(), name)
 	if err != nil {
 		ctx.JSON(iris.Map{
@@ -290,7 +298,11 @@ func SkillDelete(ctx iris.Context) {
 
 // SkillReload reloads all skills from disk
 func SkillReload(ctx iris.Context) {
+	currentSite := provider.CurrentSubSite(ctx)
 	backend := provider.GetSkillBackend()
+	if currentSite != nil {
+		backend = provider.GetSkillBackendForSite(currentSite.RootPath)
+	}
 	if err := backend.Reload(context.Background()); err != nil {
 		ctx.JSON(iris.Map{
 			"code": -1,

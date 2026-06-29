@@ -19,4 +19,6 @@ type AiChatMessage struct {
 	IsSummary bool `json:"is_summary" gorm:"column:is_summary;type:tinyint(1) not null;default:0;comment:是否摘要消息"`
 	// SummaryOf 若为摘要消息，记录被覆盖的起始消息ID
 	SummaryOf uint `json:"summary_of" gorm:"column:summary_of;type:int(10) unsigned not null;default:0;comment:摘要覆盖起始ID"`
+	// Files 用户上传的文件列表（JSON 数组）
+	Files string `json:"files" gorm:"column:files;type:text;comment:上传文件列表 JSON"`
 }
