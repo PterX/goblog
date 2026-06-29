@@ -530,7 +530,7 @@ func (s *DjangoEngine) ExecuteWriter(w io.Writer, filename string, _ string, bin
 				var urlPrefix string
 				baseUrl := currentSite.System.BaseUrl
 				place, ok := dataMap["place"].(*model.Place)
-				if ok {
+				if ok && place != nil {
 					if currentSite.PluginPlace.UrlType == config.PlaceUrlTypeSubdomain {
 						//
 						topDomain := strings.SplitN(currentSite.Host, ".", 2)[1]
@@ -543,7 +543,7 @@ func (s *DjangoEngine) ExecuteWriter(w io.Writer, filename string, _ string, bin
 					}
 				}
 				// 开始 replace
-				if baseUrl != "" {
+				if urlPrefix != "" && baseUrl != "" {
 					placeUrl := []byte(urlPrefix)
 					baseUrlBytes := []byte(baseUrl)
 					escapedBaseUrl := regexp.QuoteMeta(baseUrl)

@@ -1122,7 +1122,9 @@ func AddTranslateLog(result *AnqiTranslateTextRequest) {
 func AddTranslateHtmlLog(result *AnqiTranslateHtmlResult) {
 	// translate log 只记录到主站点的库里
 	db := GetDefaultDB()
-
+	if len(result.Uri) > 190 {
+		result.Uri = result.Uri[:190]
+	}
 	logData := model.TranslateHtmlLog{
 		Uri:        result.Uri,
 		Language:   result.Language,
