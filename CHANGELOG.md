@@ -1,5 +1,29 @@
 # 更新日志
 
+## v3.6.2 `AnQiCMS` `2026-06-30`
+
+### ✨ 新增功能
+
+- **城市分站全站内容复用**：城市分站支持内容全站复用模式，主站内容自动同步至分站，支持子域名和目录两种 URL 形式。
+- **AI 对话系统重构**：多模型切换（anqi-flash / anqi-pro / 自定义模型）、文件附件上传支持、AiSetting 持久化最后使用的模型，对话 session 机制重构。
+- **AI Agent 智能体与定时任务**：新增 AiAgent 模型（支持 Cron 表达式、执行策略、次数限制等），AiAgentLog 记录执行状态；集成 robfig/cron 调度器，启动时自动加载并定时执行 Agent 任务。
+- **内置 7 个 AI 种子技能**：新增 anqicms-dev、api-dev、batch-operations、content-planner、seo-analyzer、site-health、template-dev 技能文件，开箱即用。
+- **多语言翻译支持自定义接口**：多语言翻译功能支持接入自定义翻译 API 接口。
+- **对象存储上传 ContentType 设置**：所有云存储（AWS / Google / 腾讯云 / 七牛 / 又拍云）上传时自动设置 HTTP Content-Type。
+
+### ⚡ 功能优化
+
+- **AI 技能系统升级**：支持技能模板语法（$ARGUMENTS 变量、shell 命令注入等），增加 DisableModelInvocation、UserInvocable、AllowedTools 等元数据字段，支持插件命名空间。
+- **Sitemap 兼容旧地址**：保持对旧版 Sitemap 路径的兼容，升级平滑过渡。
+- **清理冗余前端资源**：移除未使用的 jquery.pjax.js、nprogress.js 等第三方库文件，减小发布包体积。
+
+### 🐛 问题修复
+
+- **图片更名未保存**：修复附件重命名后数据未持久化的问题。
+- **Windows 路径识别错误**：修复 Windows 环境下路径分隔符导致的文件操作失败问题。
+- **Y2038 兼容性修复**：将所有模型时间字段由 int32 升级为 int64，支持超过 2038 年的日期存储。
+- **对象存储上传修复**：修复对象存储上传时缺少 ContentType 导致的浏览器解析异常。
+
 ## v3.6.1 `AnQiCMS` `2026-06-22`
 
 ### ⚡ 性能优化
