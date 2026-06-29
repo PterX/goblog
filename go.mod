@@ -53,6 +53,7 @@ require (
 	golang.org/x/net v0.48.0
 	golang.org/x/oauth2 v0.35.0
 	golang.org/x/text v0.35.0
+	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
 )
@@ -174,7 +175,6 @@ require (
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/fileutil v1.3.40 // indirect
 	modernc.org/internal v1.1.9 // indirect
 	modernc.org/kv v1.0.6 // indirect

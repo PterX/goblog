@@ -360,6 +360,10 @@ func Inspect(ctx iris.Context) {
 func FileServe(ctx iris.Context) bool {
 	currentSite := provider.CurrentSite(ctx)
 	uri := ctx.RequestPath(false)
+	// 旧的Sitemap重定向
+	if (strings.HasPrefix(uri, "/archive") || strings.HasPrefix(uri, "/tag") || strings.HasPrefix(uri, "/category")) && (strings.HasSuffix(uri, ".xml") || strings.HasSuffix(uri, ".txt")) {
+		uri = "/sitemap-" + strings.TrimPrefix(uri, "/")
+	}
 	if uri != currentSite.BaseURI && !strings.HasSuffix(uri, "/") {
 		baseDir := currentSite.RootPath + "public"
 		uriFile := baseDir + strings.TrimPrefix(uri, strings.TrimRight(currentSite.BaseURI, "/"))
