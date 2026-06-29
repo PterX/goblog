@@ -26,16 +26,16 @@ import (
 
 // SkillFrontMatter 技能的 YAML 前置元数据
 type SkillFrontMatter struct {
-	Name                  string   `yaml:"name" json:"name"`
-	Description           string   `yaml:"description" json:"description"`
-	Category              string   `yaml:"category" json:"category"`
-	Version               string   `yaml:"version" json:"version"`
-	Author                string   `yaml:"author" json:"author"`
-	Tags                  []string `yaml:"tags" json:"tags"`
-	DisableModelInvocation bool   `yaml:"disable_model_invocation" json:"disable_model_invocation"`
-	UserInvocable         bool     `yaml:"user_invocable" json:"user_invocable"`
-	ArgumentHint          string   `yaml:"argument_hint" json:"argument_hint"`
-	AllowedTools          []string `yaml:"allowed_tools" json:"allowed_tools"`
+	Name                   string   `yaml:"name" json:"name"`
+	Description            string   `yaml:"description" json:"description"`
+	Category               string   `yaml:"category" json:"category"`
+	Version                string   `yaml:"version" json:"version"`
+	Author                 string   `yaml:"author" json:"author"`
+	Tags                   []string `yaml:"tags" json:"tags"`
+	DisableModelInvocation bool     `yaml:"disable_model_invocation" json:"disable_model_invocation"`
+	UserInvocable          bool     `yaml:"user_invocable" json:"user_invocable"`
+	ArgumentHint           string   `yaml:"argument_hint" json:"argument_hint"`
+	AllowedTools           []string `yaml:"allowed_tools" json:"allowed_tools"`
 }
 
 // Skill 是一个已加载的完整技能
@@ -552,181 +552,181 @@ func GetSkillBackendForSite(projectRoot string) *FilesystemSkillBackend {
 
 func skillListTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
-		Name: "skill_list",
-		Desc: "列出所有可用的技能(SKILL)。返回每个技能的名称、描述、分类和来源。先查看可用技能，再调用 skill_get 加载具体内容。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		backend := GetSkillBackend()
-		list, err := backend.List(ctx)
-		if err != nil {
-			return "", fmt.Errorf("获取技能列表失败: %w", err)
-		}
-		if len(list) == 0 {
-			return "当前没有可用的技能。", nil
-		}
-		var sb strings.Builder
-		sb.WriteString("## 📋 可用技能列表\n\n")
-		for _, s := range list {
-			fullName := s.Name
-			sb.WriteString(fmt.Sprintf("### %s\n", fullName))
-			sb.WriteString(fmt.Sprintf("- **描述**: %s\n", s.Description))
-			if s.Category != "" {
-				sb.WriteString(fmt.Sprintf("- **分类**: %s\n", s.Category))
+			Name:        "skill_list",
+			Desc:        "列出所有可用的技能(SKILL)。返回每个技能的名称、描述、分类和来源。先查看可用技能，再调用 skill_get 加载具体内容。",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+		}, func(ctx context.Context, argsJSON string) (string, error) {
+			backend := GetSkillBackend()
+			list, err := backend.List(ctx)
+			if err != nil {
+				return "", fmt.Errorf("获取技能列表失败: %w", err)
 			}
-			if s.Version != "" {
-				sb.WriteString(fmt.Sprintf("- **版本**: %s\n", s.Version))
+			if len(list) == 0 {
+				return "当前没有可用的技能。", nil
 			}
-			if len(s.Tags) > 0 {
-				sb.WriteString(fmt.Sprintf("- **标签**: %s\n", strings.Join(s.Tags, ", ")))
+			var sb strings.Builder
+			sb.WriteString("## 📋 可用技能列表\n\n")
+			for _, s := range list {
+				fullName := s.Name
+				sb.WriteString(fmt.Sprintf("### %s\n", fullName))
+				sb.WriteString(fmt.Sprintf("- **描述**: %s\n", s.Description))
+				if s.Category != "" {
+					sb.WriteString(fmt.Sprintf("- **分类**: %s\n", s.Category))
+				}
+				if s.Version != "" {
+					sb.WriteString(fmt.Sprintf("- **版本**: %s\n", s.Version))
+				}
+				if len(s.Tags) > 0 {
+					sb.WriteString(fmt.Sprintf("- **标签**: %s\n", strings.Join(s.Tags, ", ")))
+				}
+				sb.WriteString("\n")
 			}
-			sb.WriteString("\n")
+			return sb.String(), nil
 		}
-		return sb.String(), nil
-	}
 }
 
 func skillGetTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
-		Name: "skill_get",
-		Desc: "获取指定技能(SKILL)的完整内容，支持变量替换。参数: name=技能名称(必填), arguments=传递给技能的参数(可选)。返回技能完整说明文档。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"name": {
-				Type: schema.String,
-				Desc: "技能名称，必填。插件技能用 {插件名}:{技能名} 格式。",
-			},
-			"arguments": {
-				Type: schema.String,
-				Desc: "传递给技能的参数（可选），可在模板中用 $ARGUMENTS、$0、$1 等引用",
-			},
-		}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		var args struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		}
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("无法解析参数: %w", err)
-		}
-		if args.Name == "" {
-			return "错误：技能名称不能为空，请先使用 skill_list 查看可用技能。", nil
-		}
-		backend := GetSkillBackend()
-		skill, err := backend.Get(ctx, args.Name)
-		if err != nil {
-			// 尝试查找相似技能
-			list, _ := backend.List(ctx)
-			var similar []string
-			for _, s := range list {
-				if strings.Contains(strings.ToLower(s.Name), strings.ToLower(args.Name)) {
-					similar = append(similar, s.Name)
+			Name: "skill_get",
+			Desc: "获取指定技能(SKILL)的完整内容，支持变量替换。参数: name=技能名称(必填), arguments=传递给技能的参数(可选)。返回技能完整说明文档。",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+				"name": {
+					Type: schema.String,
+					Desc: "技能名称，必填。插件技能用 {插件名}:{技能名} 格式。",
+				},
+				"arguments": {
+					Type: schema.String,
+					Desc: "传递给技能的参数（可选），可在模板中用 $ARGUMENTS、$0、$1 等引用",
+				},
+			}),
+		}, func(ctx context.Context, argsJSON string) (string, error) {
+			var args struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}
+			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+				return "", fmt.Errorf("无法解析参数: %w", err)
+			}
+			if args.Name == "" {
+				return "错误：技能名称不能为空，请先使用 skill_list 查看可用技能。", nil
+			}
+			backend := GetSkillBackend()
+			skill, err := backend.Get(ctx, args.Name)
+			if err != nil {
+				// 尝试查找相似技能
+				list, _ := backend.List(ctx)
+				var similar []string
+				for _, s := range list {
+					if strings.Contains(strings.ToLower(s.Name), strings.ToLower(args.Name)) {
+						similar = append(similar, s.Name)
+					}
 				}
+				if len(similar) > 0 {
+					return fmt.Sprintf("未找到技能 %q。相似技能: %s", args.Name, strings.Join(similar, ", ")), nil
+				}
+				return fmt.Sprintf("未找到技能 %q。请先用 skill_list 查看可用技能列表。", args.Name), nil
 			}
-			if len(similar) > 0 {
-				return fmt.Sprintf("未找到技能 %q。相似技能: %s", args.Name, strings.Join(similar, ", ")), nil
-			}
-			return fmt.Sprintf("未找到技能 %q。请先用 skill_list 查看可用技能列表。", args.Name), nil
+
+			// 展开变量
+			expanded := skill.Expand(args.Arguments, "")
+
+			result := fmt.Sprintf("# %s\n\n**描述**: %s\n**来源**: %s\n\n---\n\n%s",
+				skill.FullName(), skill.Description, skill.Source, expanded)
+			return result, nil
 		}
-
-		// 展开变量
-		expanded := skill.Expand(args.Arguments, "")
-
-		result := fmt.Sprintf("# %s\n\n**描述**: %s\n**来源**: %s\n\n---\n\n%s",
-			skill.FullName(), skill.Description, skill.Source, expanded)
-		return result, nil
-	}
 }
 
 func skillReloadTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
-		Name: "skill_reload",
-		Desc: "重新加载所有技能(SKILL)，从所有技能目录重新扫描。管理员编辑或新增技能后调用此工具使其生效。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		backend := GetSkillBackend()
-		if err := backend.Reload(ctx); err != nil {
-			return "", fmt.Errorf("重新加载技能失败: %w", err)
+			Name:        "skill_reload",
+			Desc:        "重新加载所有技能(SKILL)，从所有技能目录重新扫描。管理员编辑或新增技能后调用此工具使其生效。",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+		}, func(ctx context.Context, argsJSON string) (string, error) {
+			backend := GetSkillBackend()
+			if err := backend.Reload(ctx); err != nil {
+				return "", fmt.Errorf("重新加载技能失败: %w", err)
+			}
+			list, _ := backend.List(ctx)
+			return fmt.Sprintf("技能已重新加载，当前有 %d 个可用技能。", len(list)), nil
 		}
-		list, _ := backend.List(ctx)
-		return fmt.Sprintf("技能已重新加载，当前有 %d 个可用技能。", len(list)), nil
-	}
 }
 
 func skillSaveTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
-		Name: "skill_save",
-		Desc: "创建或更新技能(SKILL)。技能是存储在 data/skills/ 下的结构化知识文档，包含 frontmatter 元数据和 Markdown 正文。如果同名技能已存在则更新，不存在则创建。创建后自动生效。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"name": {
-				Type: schema.String,
-				Desc: "技能名称，应使用英文小写连字符格式，如 seo-analyzer",
-			},
-			"description": {
-				Type: schema.String,
-				Desc: "技能描述，一句话说明技能的用途",
-			},
-			"category": {
-				Type: schema.String,
-				Desc: "技能分类，如 SEO、写作、运维等",
-			},
-			"content": {
-				Type: schema.String,
-				Desc: "技能内容（Markdown 格式）。可在内容中使用 $ARGUMENTS 引用传入的参数",
-			},
-			"tags": {
-				Type: schema.String,
-				Desc: "标签（英文逗号分隔），如 seo, analysis, keyword",
-			},
-			"version": {
-				Type: schema.String,
-				Desc: "版本号，如 1.0",
-			},
-			"author": {
-				Type: schema.String,
-				Desc: "作者",
-			},
-		}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		var args struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Category    string `json:"category"`
-			Content     string `json:"content"`
-			Tags        string `json:"tags"`
-			Version     string `json:"version"`
-			Author      string `json:"author"`
-		}
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("无法解析参数: %w", err)
-		}
-		if args.Name == "" || args.Content == "" {
-			return "错误：名称和内容不能为空", nil
-		}
-		var tags []string
-		if args.Tags != "" {
-			for _, t := range strings.Split(args.Tags, ",") {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					tags = append(tags, t)
+			Name: "skill_save",
+			Desc: "创建或更新技能(SKILL)。技能是存储在 data/skills/ 下的结构化知识文档，包含 frontmatter 元数据和 Markdown 正文。如果同名技能已存在则更新，不存在则创建。创建后自动生效。",
+			ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+				"name": {
+					Type: schema.String,
+					Desc: "技能名称，应使用英文小写连字符格式，如 seo-analyzer",
+				},
+				"description": {
+					Type: schema.String,
+					Desc: "技能描述，一句话说明技能的用途",
+				},
+				"category": {
+					Type: schema.String,
+					Desc: "技能分类，如 SEO、写作、运维等",
+				},
+				"content": {
+					Type: schema.String,
+					Desc: "技能内容（Markdown 格式）。可在内容中使用 $ARGUMENTS 引用传入的参数",
+				},
+				"tags": {
+					Type: schema.String,
+					Desc: "标签（英文逗号分隔），如 seo, analysis, keyword",
+				},
+				"version": {
+					Type: schema.String,
+					Desc: "版本号，如 1.0",
+				},
+				"author": {
+					Type: schema.String,
+					Desc: "作者",
+				},
+			}),
+		}, func(ctx context.Context, argsJSON string) (string, error) {
+			var args struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				Category    string `json:"category"`
+				Content     string `json:"content"`
+				Tags        string `json:"tags"`
+				Version     string `json:"version"`
+				Author      string `json:"author"`
+			}
+			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+				return "", fmt.Errorf("无法解析参数: %w", err)
+			}
+			if args.Name == "" || args.Content == "" {
+				return "错误：名称和内容不能为空", nil
+			}
+			var tags []string
+			if args.Tags != "" {
+				for _, t := range strings.Split(args.Tags, ",") {
+					t = strings.TrimSpace(t)
+					if t != "" {
+						tags = append(tags, t)
+					}
 				}
 			}
+			skill := &Skill{
+				SkillFrontMatter: SkillFrontMatter{
+					Name:        args.Name,
+					Description: args.Description,
+					Category:    args.Category,
+					Version:     args.Version,
+					Author:      args.Author,
+					Tags:        tags,
+				},
+				Content: args.Content,
+			}
+			backend := GetSkillBackend()
+			if err := backend.Save(ctx, skill); err != nil {
+				return "", fmt.Errorf("保存技能失败: %w", err)
+			}
+			return fmt.Sprintf("技能 %q 已保存，路径: data/skills/%s/SKILL.md", args.Name, args.Name), nil
 		}
-		skill := &Skill{
-			SkillFrontMatter: SkillFrontMatter{
-				Name:        args.Name,
-				Description: args.Description,
-				Category:    args.Category,
-				Version:     args.Version,
-				Author:      args.Author,
-				Tags:        tags,
-			},
-			Content: args.Content,
-		}
-		backend := GetSkillBackend()
-		if err := backend.Save(ctx, skill); err != nil {
-			return "", fmt.Errorf("保存技能失败: %w", err)
-		}
-		return fmt.Sprintf("技能 %q 已保存，路径: data/skills/%s/SKILL.md", args.Name, args.Name), nil
-	}
 }
 
 // ================================================================
