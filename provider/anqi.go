@@ -1136,7 +1136,7 @@ func AddTranslateHtmlLog(result *AnqiTranslateHtmlResult) {
 	db.Model(&model.TranslateHtmlLog{}).Create(&logData)
 }
 
-// AnqiTranslateHtml 多语言html翻译，只能使用官方接口，从原站语言翻译成目标语言
+// AnqiTranslateHtml 多语言html翻译，从原站语言翻译成目标语言
 func (w *Website) AnqiTranslateHtml(req *AnqiTranslateHtmlRequest) (content string, err error) {
 	if req.Language == "" {
 		req.Language = w.System.Language

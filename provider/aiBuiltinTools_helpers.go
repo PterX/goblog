@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"kandaoni.com/anqicms/config"
 )
 
 // ================================================================
@@ -170,18 +168,10 @@ func isSensitiveInputPath(path string) bool {
 // safePathResolve resolves a path relative to projectRoot and validates it.
 // More robust than the original safePath — returns friendly error messages.
 // All paths are bounded to projectRoot; temp files should use ensureCachePath() instead.
-func safePathResolve(path string) (string, error) {
+func safePathResolve(path, projectRoot string) (string, error) {
 	root := projectRoot
 	if root == "" {
-		if config.ExecPath != "" {
-			root = strings.TrimSuffix(config.ExecPath, "/")
-		} else {
-			wd, err := os.Getwd()
-			if err != nil {
-				return "", fmt.Errorf("无法获取工作目录: %w", err)
-			}
-			root = wd
-		}
+		return "", fmt.Errorf("projectRoot 未配置")
 	}
 
 	p := path
@@ -208,19 +198,8 @@ func safePathResolve(path string) (string, error) {
 
 // ensureCachePath returns the cache directory path and ensures it exists.
 // All temporary/generated files (scripts, build output, etc.) should be written here.
-func ensureCachePath() (string, error) {
-	cp := cachePath
-	if cp == "" {
-		if config.ExecPath != "" {
-			cp = config.ExecPath + "cache"
-		} else {
-			wd, err := os.Getwd()
-			if err != nil {
-				return "", fmt.Errorf("无法获取工作目录: %w", err)
-			}
-			cp = filepath.Join(wd, "cache")
-		}
-	}
+func ensureCachePath(projectRoot string) (string, error) {
+	cp := filepath.Join(projectRoot, "cache")
 	if err := os.MkdirAll(cp, 0755); err != nil {
 		return "", fmt.Errorf("创建缓存目录失败: %w", err)
 	}
@@ -233,7 +212,7 @@ func ensureCachePath() (string, error) {
 
 // findSimilarFiles searches up to maxResults files with the same basename
 // within the project, ranked by shared path prefix similarity.
-func findSimilarFiles(requestedPath string, maxResults int) []string {
+func findSimilarFiles(requestedPath string, maxResults int, projectRoot string) []string {
 	filename := filepath.Base(requestedPath)
 	if filename == "" || filename == "." || filename == "/" {
 		return nil
@@ -486,7 +465,7 @@ func buildSkeleton(data []byte, path, relPath string, totalLines int) string {
 		}
 		b.WriteString(fmt.Sprintf("  %4s  %s  (%s)\n", lineRange, sym.Name, sym.Kind))
 	}
-	b.WriteString("\n[文件超过 %d 行，显示骨架结构。使用 read_file 的 offset/limit 参数读取特定部分，或使用 list_symbols/read_symbol 查看具体符号]\n")
+	b.WriteString("\n[文件超过 %d 行，显示骨架结构。使用 read_file 的 offset/limit 参数读取特定部分]\n")
 	return b.String()
 }
 

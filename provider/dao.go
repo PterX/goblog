@@ -152,6 +152,8 @@ func AutoMigrateDB(db *gorm.DB, focus bool) error {
 			&model.TagContent{},
 			&model.ArchiveFavorite{},
 			&model.AiChatMessage{},
+			&model.AiAgent{},
+			&model.AiAgentLog{},
 			&model.Place{},
 		}
 		//自动迁移数据库

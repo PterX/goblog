@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"bytes"
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,33 +16,129 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"gopkg.in/yaml.v3"
 	"kandaoni.com/anqicms/config"
 )
 
-// ---------------------------------------------------------------------------
-// Skill types
-// ---------------------------------------------------------------------------
+// ================================================================
+//  Skill 结构体 — 与 AtomCode 兼容
+// ================================================================
 
-// SkillFrontMatter is the YAML frontmatter metadata parsed from SKILL.md.
+// SkillFrontMatter 技能的 YAML 前置元数据
 type SkillFrontMatter struct {
-	Name        string   `yaml:"name" json:"name"`
-	Description string   `yaml:"description" json:"description"`
-	Category    string   `yaml:"category" json:"category"`
-	Version     string   `yaml:"version" json:"version"`
-	Author      string   `yaml:"author" json:"author"`
-	Tags        []string `yaml:"tags" json:"tags"`
+	Name                  string   `yaml:"name" json:"name"`
+	Description           string   `yaml:"description" json:"description"`
+	Category              string   `yaml:"category" json:"category"`
+	Version               string   `yaml:"version" json:"version"`
+	Author                string   `yaml:"author" json:"author"`
+	Tags                  []string `yaml:"tags" json:"tags"`
+	DisableModelInvocation bool   `yaml:"disable_model_invocation" json:"disable_model_invocation"`
+	UserInvocable         bool     `yaml:"user_invocable" json:"user_invocable"`
+	ArgumentHint          string   `yaml:"argument_hint" json:"argument_hint"`
+	AllowedTools          []string `yaml:"allowed_tools" json:"allowed_tools"`
 }
 
-// Skill is a loaded skill with full content.
+// Skill 是一个已加载的完整技能
 type Skill struct {
 	SkillFrontMatter
 	Content       string    `json:"content"`
 	BaseDirectory string    `json:"base_directory"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	SourcePath    string    `json:"source_path"`
+	// 来源标识：global / project / plugin:{name}
+	Source string `json:"source"`
+	// 命名空间（插件技能使用）
+	Namespace string `json:"namespace,omitempty"`
 }
 
-// SkillBackend is the interface for loading skills from storage.
+// FullName 返回完整的技能名称（含命名空间）
+func (s *Skill) FullName() string {
+	if s.Namespace != "" {
+		return s.Namespace + ":" + s.Name
+	}
+	return s.Name
+}
+
+// Expand 展开模板中的变量替换，与 AtomCode 兼容
+func (s *Skill) Expand(arguments string, sessionID string) string {
+	result := s.Content
+
+	// 1. $ARGUMENTS[N] 位置参数
+	positional := strings.Fields(arguments)
+	for i, arg := range positional {
+		result = strings.ReplaceAll(result, fmt.Sprintf("$ARGUMENTS[%d]", i), arg)
+	}
+
+	// 2. $N 简写
+	for i, arg := range positional {
+		result = strings.ReplaceAll(result, fmt.Sprintf("$%d", i), arg)
+	}
+
+	// 3. $ARGUMENTS — 仅当模板中使用了 $ARGUMENTS 标记时才替换
+	if strings.Contains(s.Content, "$ARGUMENTS") {
+		result = strings.ReplaceAll(result, "$ARGUMENTS", arguments)
+	} else if strings.TrimSpace(arguments) != "" {
+		result = result + "\n\nARGUMENTS: " + arguments
+	}
+
+	// 4. ${CLAUDE_SESSION_ID}
+	result = strings.ReplaceAll(result, "${CLAUDE_SESSION_ID}", sessionID)
+
+	// 5. ${CLAUDE_SKILL_DIR}
+	result = strings.ReplaceAll(result, "${CLAUDE_SKILL_DIR}", s.BaseDirectory)
+
+	// 6. !`command` shell 注入
+	result = expandShellInjections(result)
+
+	return result
+}
+
+// expandShellInjections 执行模板中的 !`command` 并替换为输出
+func expandShellInjections(tmpl string) string {
+	var result strings.Builder
+	remaining := tmpl
+	for {
+		start := strings.Index(remaining, "!`")
+		if start == -1 {
+			result.WriteString(remaining)
+			break
+		}
+		result.WriteString(remaining[:start])
+		after := remaining[start+2:]
+		end := strings.Index(after, "`")
+		if end == -1 {
+			result.WriteString("!(")
+			remaining = after
+			continue
+		}
+		cmd := after[:end]
+		output := runShellCommand(cmd)
+		result.WriteString(output)
+		remaining = after[end+1:]
+	}
+	return result.String()
+}
+
+func runShellCommand(cmd string) string {
+	var command exec.Cmd
+	command = *exec.Command("sh", "-c", cmd)
+	out, err := command.Output()
+	if err != nil {
+		var stderrBuf bytes.Buffer
+		command.Stderr = &stderrBuf
+		_ = command.Run()
+		if stderrBuf.Len() > 0 {
+			return strings.TrimSpace(stderrBuf.String())
+		}
+		return fmt.Sprintf("[error: %s]", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ================================================================
+//  SkillBackend 接口
+// ================================================================
+
 type SkillBackend interface {
 	List(ctx context.Context) ([]SkillFrontMatter, error)
 	Get(ctx context.Context, name string) (*Skill, error)
@@ -47,29 +146,159 @@ type SkillBackend interface {
 	Reload(ctx context.Context) error
 }
 
-// ---------------------------------------------------------------------------
-// FilesystemBackend — scans data/skills/*/SKILL.md
-// ---------------------------------------------------------------------------
+// ================================================================
+//  FilesystemSkillBackend — 多目录扫描 + 命名空间技能
+// ================================================================
 
 type FilesystemSkillBackend struct {
 	mu     sync.RWMutex
-	skills map[string]*Skill // keyed by name
-	dir    string            // absolute path to data/skills/
+	skills map[string]*Skill // keyed by FullName()
+	dirs   []string          // 扫描目录（低→高优先级）
 }
 
-// NewFilesystemSkillBackend creates a backend that loads skills from data/skills/.
-func NewFilesystemSkillBackend() *FilesystemSkillBackend {
-	dir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "skills")
+// NewFilesystemSkillBackend 创建多目录 SkillBackend
+// globalDir: config.ExecPath + "data/skills" (全局技能)
+// projectDir: site.RootPath + "/data/skills" (项目技能，可空)
+func NewFilesystemSkillBackend(projectDir string) *FilesystemSkillBackend {
+	globalDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "skills")
+	// 确保全局技能目录存在
+	_ = os.MkdirAll(globalDir, 0755)
+
+	// 内嵌种子：首次运行时将内嵌的默认技能提取到全局目录
+	ensureSeedSkills(globalDir)
+
+	dirs := []string{globalDir}
+	if projectDir != "" && projectDir != globalDir {
+		_ = os.MkdirAll(projectDir, 0755)
+		dirs = append(dirs, projectDir)
+	}
+
+	// 插件目录
+	pluginDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "plugins")
+	if entries, err := os.ReadDir(pluginDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				pSkillDir := filepath.Join(pluginDir, entry.Name(), "skills")
+				if info, err := os.Stat(pSkillDir); err == nil && info.IsDir() {
+					dirs = append(dirs, pSkillDir)
+				}
+			}
+		}
+	}
+
 	b := &FilesystemSkillBackend{
 		skills: make(map[string]*Skill),
-		dir:    dir,
+		dirs:   dirs,
 	}
 	if err := b.Reload(context.Background()); err != nil {
 		log.Printf("[skill] initial reload failed: %v", err)
 	}
-	log.Printf("[skill] backend initialized, dir=%s, count=%d", dir, len(b.skills))
+	log.Printf("[skill] backend initialized, dirs=%v, count=%d", dirs, len(b.skills))
 	return b
 }
+
+// ================================================================
+//  内嵌种子技能
+// ================================================================
+
+//go:embed seeds/skills/*/SKILL.md
+var seedSkillsFS embed.FS
+
+// ensureSeedSkills 将内嵌的种子技能提取到全局技能目录
+// 如果目标目录中已存在同名技能则跳过
+func ensureSeedSkills(globalDir string) {
+	entries, err := seedSkillsFS.ReadDir("seeds/skills")
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		skillName := entry.Name()
+		targetDir := filepath.Join(globalDir, skillName)
+		targetFile := filepath.Join(targetDir, "SKILL.md")
+		// 已存在则跳过
+		if _, err := os.Stat(targetFile); err == nil {
+			continue
+		}
+		// 读取内嵌的 SKILL.md
+		embedPath := fmt.Sprintf("seeds/skills/%s/SKILL.md", skillName)
+		data, err := seedSkillsFS.ReadFile(embedPath)
+		if err != nil {
+			log.Printf("[skill] failed to read embedded seed %s: %v", skillName, err)
+			continue
+		}
+		if err := os.MkdirAll(targetDir, 0755); err != nil {
+			log.Printf("[skill] failed to create dir for seed %s: %v", skillName, err)
+			continue
+		}
+		if err := os.WriteFile(targetFile, data, 0644); err != nil {
+			log.Printf("[skill] failed to write seed %s: %v", skillName, err)
+			continue
+		}
+		log.Printf("[skill] extracted seed skill: %s", skillName)
+	}
+}
+
+// ================================================================
+//  插件技能源管理
+// ================================================================
+
+// InstallSkillPluginFromGit 从 Git 仓库安装技能插件
+// 克隆到 data/plugins/{name}/ 然后重新加载
+func InstallSkillPluginFromGit(name, repoURL string) error {
+	if name == "" || repoURL == "" {
+		return fmt.Errorf("name and repo URL are required")
+	}
+	pluginDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "plugins", name)
+	// 已存在则先更新
+	if _, err := os.Stat(pluginDir); err == nil {
+		// git pull
+		cmd := exec.Command("git", "-C", pluginDir, "pull", "--ff-only")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git pull failed: %s: %w", string(out), err)
+		}
+	} else {
+		// git clone
+		parentDir := filepath.Dir(pluginDir)
+		_ = os.MkdirAll(parentDir, 0755)
+		cmd := exec.Command("git", "clone", repoURL, pluginDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git clone failed: %s: %w", string(out), err)
+		}
+	}
+	return nil
+}
+
+// UninstallSkillPlugin 卸载技能插件
+func UninstallSkillPlugin(name string) error {
+	pluginDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "plugins", name)
+	return os.RemoveAll(pluginDir)
+}
+
+// ListSkillPlugins 列出已安装的技能插件
+func ListSkillPlugins() ([]string, error) {
+	pluginDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "plugins")
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
+// ================================================================
+//  SkillBackend 实现
+// ================================================================
 
 func (b *FilesystemSkillBackend) List(_ context.Context) ([]SkillFrontMatter, error) {
 	b.mu.RLock()
@@ -89,85 +318,59 @@ func (b *FilesystemSkillBackend) Get(_ context.Context, name string) (*Skill, er
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	s, ok := b.skills[name]
-	if !ok {
-		return nil, fmt.Errorf("skill %q not found", name)
+	// 精确查找
+	if s, ok := b.skills[name]; ok {
+		clone := *s
+		return &clone, nil
 	}
-	clone := *s
-	return &clone, nil
+	// 命名空间回退：如果未指定命名空间，查找唯一匹配的后缀
+	if !strings.Contains(name, ":") {
+		suffix := ":" + name
+		var found *Skill
+		for k, s := range b.skills {
+			if strings.HasSuffix(k, suffix) {
+				if found != nil {
+					return nil, fmt.Errorf("skill %q 在多个命名空间中存在，请使用完整名称", name)
+				}
+				found = s
+			}
+		}
+		if found != nil {
+			clone := *found
+			return &clone, nil
+		}
+	}
+	return nil, fmt.Errorf("skill %q not found", name)
 }
 
 func (b *FilesystemSkillBackend) Save(_ context.Context, skill *Skill) error {
-	if skill == nil {
-		return fmt.Errorf("skill is nil")
-	}
-	if skill.Name == "" {
+	if skill == nil || skill.Name == "" {
 		return fmt.Errorf("skill name is required")
 	}
 
-	// Build YAML frontmatter
-	var buf strings.Builder
-	buf.WriteString("---\n")
-	if skill.Description != "" {
-		buf.WriteString(fmt.Sprintf("description: %s\n", skill.Description))
-	}
-	if skill.Category != "" {
-		buf.WriteString(fmt.Sprintf("category: %s\n", skill.Category))
-	}
-	if skill.Version != "" {
-		buf.WriteString(fmt.Sprintf("version: %s\n", skill.Version))
-	}
-	if skill.Author != "" {
-		buf.WriteString(fmt.Sprintf("author: %s\n", skill.Author))
-	}
-	if len(skill.Tags) > 0 {
-		buf.WriteString("tags:\n")
-		for _, tag := range skill.Tags {
-			buf.WriteString(fmt.Sprintf("  - %s\n", tag))
-		}
-	}
-	buf.WriteString("---\n\n")
-	// Write body
-	buf.WriteString(skill.Content)
-	// Ensure trailing newline
-	content := buf.String()
-	if !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	// Build directory: data/skills/<name>/
-	skillDir := filepath.Join(b.dir, skill.Name)
+	// 保存到全局目录
+	globalDir := b.dirs[0]
+	skillDir := filepath.Join(globalDir, skill.Name)
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
-		return fmt.Errorf("create skill dir: %w", err)
+		return fmt.Errorf("创建技能目录失败: %w", err)
 	}
 
-	skillPath := filepath.Join(skillDir, "SKILL.md")
-	if err := os.WriteFile(skillPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("write skill file: %w", err)
+	// 构建 frontmatter + 内容
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(skill.SkillFrontMatter); err != nil {
+		return fmt.Errorf("编码 frontmatter 失败: %w", err)
+	}
+	enc.Close()
+
+	fullContent := fmt.Sprintf("---\n%s---\n\n%s", buf.String(), skill.Content)
+	mdPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(mdPath, []byte(fullContent), 0644); err != nil {
+		return fmt.Errorf("写入 SKILL.md 失败: %w", err)
 	}
 
-	// Reload the skill into cache
-	raw, err := os.ReadFile(skillPath)
-	if err != nil {
-		return fmt.Errorf("re-read skill file: %w", err)
-	}
-	fm, body := parseSkillFrontmatter(string(raw))
-	if fm.Description == "" {
-		fm.Description = firstParagraph(body)
-	}
-	info, _ := os.Stat(skillPath)
-	skill = &Skill{
-		SkillFrontMatter: fm,
-		Content:          body,
-		BaseDirectory:    skillDir,
-		UpdatedAt:        info.ModTime(),
-		SourcePath:       skillPath,
-	}
-	b.skills[skill.Name] = skill
-	return nil
+	return b.Reload(context.Background())
 }
 
 func (b *FilesystemSkillBackend) Reload(_ context.Context) error {
@@ -175,128 +378,137 @@ func (b *FilesystemSkillBackend) Reload(_ context.Context) error {
 	defer b.mu.Unlock()
 
 	newSkills := make(map[string]*Skill)
-
-	// Ensure dir exists
-	if err := os.MkdirAll(b.dir, 0755); err != nil {
-		return fmt.Errorf("create skills dir: %w", err)
+	// 按优先级从低到高扫描，后加载的同名技能覆盖前面的
+	for _, dir := range b.dirs {
+		b.scanDir(newSkills, dir, "")
 	}
-
-	entries, err := os.ReadDir(b.dir)
-	if err != nil {
-		return fmt.Errorf("read skills dir: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		skillPath := filepath.Join(b.dir, entry.Name(), "SKILL.md")
-		info, err := os.Stat(skillPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			log.Printf("[skill] stat %s: %v", skillPath, err)
-			continue
-		}
-
-		raw, err := os.ReadFile(skillPath)
-		if err != nil {
-			log.Printf("[skill] read %s: %v", skillPath, err)
-			continue
-		}
-
-		content := string(raw)
-		fm, body := parseSkillFrontmatter(content)
-
-		// If name is not set in frontmatter, use directory name
-		if fm.Name == "" {
-			fm.Name = entry.Name()
-		}
-
-		// If description is not set, use first paragraph
-		if fm.Description == "" {
-			fm.Description = firstParagraph(body)
-		}
-
-		skill := &Skill{
-			SkillFrontMatter: fm,
-			Content:          body,
-			BaseDirectory:    filepath.Join(b.dir, entry.Name()),
-			UpdatedAt:        info.ModTime(),
-			SourcePath:       skillPath,
-		}
-		newSkills[fm.Name] = skill
-	}
-
+	// 扫描插件目录获取命名空间技能
+	b.scanPlugins(newSkills)
 	b.skills = newSkills
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Frontmatter parser (simple line-based, no yaml dependency needed)
-// ---------------------------------------------------------------------------
-
-func parseSkillFrontmatter(content string) (SkillFrontMatter, string) {
-	var fm SkillFrontMatter
-
-	if !strings.HasPrefix(content, "---\n") && !strings.HasPrefix(content, "---\r\n") {
-		return fm, content
+// scanDir 扫描单个目录（扁平 *.md 和 SKILL.md 子目录）
+func (b *FilesystemSkillBackend) scanDir(skills map[string]*Skill, dir string, namespace string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
 	}
-
-	// Find closing ---
-	rest := content[4:] // skip "---\n" or "---\r\n"
-	nl := 2
-	if strings.HasPrefix(content, "---\n") {
-		rest = content[4:]
-		nl = 4 // \n---
-	} else {
-		rest = content[5:]
-		nl = 5 // \n---\r\n or \r\n---
-	}
-
-	closeIdx := strings.Index(rest, "\n---")
-	if closeIdx < 0 {
-		return fm, content
-	}
-
-	fmText := rest[:closeIdx]
-	body := rest[closeIdx+nl:]
-
-	for _, line := range strings.Split(fmText, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "name:") {
-			fm.Name = strings.TrimSpace(line[5:])
-		} else if strings.HasPrefix(line, "description:") {
-			fm.Description = strings.TrimSpace(line[12:])
-		} else if strings.HasPrefix(line, "category:") {
-			fm.Category = strings.TrimSpace(line[9:])
-		} else if strings.HasPrefix(line, "version:") {
-			fm.Version = strings.TrimSpace(line[8:])
-		} else if strings.HasPrefix(line, "author:") {
-			fm.Author = strings.TrimSpace(line[7:])
-		} else if strings.HasPrefix(line, "tags:") {
-			// Tags can be inline: tags: [seo, analysis] or multi-line
-			tagPart := strings.TrimSpace(line[5:])
-			tagPart = strings.Trim(tagPart, "[]")
-			for _, t := range strings.Split(tagPart, ",") {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					fm.Tags = append(fm.Tags, t)
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if entry.IsDir() {
+			// 子目录：查找 SKILL.md
+			skillMD := filepath.Join(path, "SKILL.md")
+			if info, err := os.Stat(skillMD); err == nil && !info.IsDir() {
+				if skill := parseSkillFromFile(skillMD, namespace); skill != nil {
+					skill.Source = b.skillSource(dir)
+					key := skill.FullName()
+					skills[key] = skill
 				}
+			}
+		} else if strings.HasSuffix(entry.Name(), ".md") && entry.Name() != "README.md" {
+			// 扁平 *.md 文件（仅在顶层）
+			if skill := parseSkillFromFile(path, namespace); skill != nil {
+				skill.Source = b.skillSource(dir)
+				key := skill.FullName()
+				skills[key] = skill
 			}
 		}
 	}
+}
 
-	// Strip quotes from values
-	fm.Name = strings.Trim(fm.Name, "\"'")
-	fm.Description = strings.Trim(fm.Description, "\"'")
-	fm.Category = strings.Trim(fm.Category, "\"'")
-	fm.Version = strings.Trim(fm.Version, "\"'")
-	fm.Author = strings.Trim(fm.Author, "\"'")
+func (b *FilesystemSkillBackend) scanPlugins(skills map[string]*Skill) {
+	pluginDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "plugins")
+	entries, err := os.ReadDir(pluginDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pluginName := entry.Name()
+		pSkillsDir := filepath.Join(pluginDir, pluginName, "skills")
+		if info, err := os.Stat(pSkillsDir); err == nil && info.IsDir() {
+			b.scanDir(skills, pSkillsDir, pluginName)
+		}
+	}
+}
+
+func (b *FilesystemSkillBackend) skillSource(dir string) string {
+	globalDir := b.dirs[0]
+	dir = filepath.Clean(dir)
+	if dir == filepath.Clean(globalDir) {
+		return "global"
+	}
+	if len(b.dirs) > 1 && dir == filepath.Clean(b.dirs[1]) {
+		return "project"
+	}
+	pluginDir := filepath.Join(strings.TrimSuffix(config.ExecPath, "/"), "data", "plugins")
+	if strings.HasPrefix(dir, pluginDir) {
+		rel, _ := filepath.Rel(pluginDir, dir)
+		parts := strings.SplitN(rel, string(filepath.Separator), 2)
+		if len(parts) > 0 {
+			return "plugin:" + parts[0]
+		}
+	}
+	return "global"
+}
+
+// ================================================================
+//  SKILL.md 解析
+// ================================================================
+
+func parseSkillFromFile(path string, namespace string) *Skill {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	fm, body := parseSkillFrontmatter(string(data))
+
+	// 名称：文件名（不含扩展名）或 frontmatter 中的 name
+	baseName := fm.Name
+	if baseName == "" {
+		baseName = strings.TrimSuffix(filepath.Base(path), ".md")
+		baseName = strings.TrimSuffix(baseName, ".SKILL")
+	}
+	fm.Name = baseName
+
+	if fm.Description == "" {
+		fm.Description = firstParagraph(body)
+	}
+
+	skill := &Skill{
+		SkillFrontMatter: fm,
+		Content:          strings.TrimSpace(body),
+		BaseDirectory:    filepath.Dir(path),
+		SourcePath:       path,
+		Namespace:        namespace,
+	}
+	if info, err := os.Stat(path); err == nil {
+		skill.UpdatedAt = info.ModTime()
+	}
+	return skill
+}
+
+// ================================================================
+//  Frontmatter 解析（YAML）
+// ================================================================
+
+func parseSkillFrontmatter(content string) (SkillFrontMatter, string) {
+	content = strings.TrimSpace(content)
+	var fm SkillFrontMatter
+	body := content
+
+	if strings.HasPrefix(content, "---") {
+		rest := content[3:]
+		end := strings.Index(rest, "\n---")
+		if end >= 0 {
+			yamlBlock := rest[:end]
+			body = strings.TrimSpace(rest[end+4:])
+			_ = yaml.Unmarshal([]byte(yamlBlock), &fm)
+		}
+	}
 
 	return fm, body
 }
@@ -311,32 +523,37 @@ func firstParagraph(content string) string {
 	return ""
 }
 
-// ---------------------------------------------------------------------------
-// Global skill backend instance
-// ---------------------------------------------------------------------------
+// ================================================================
+//  全局单例
+// ================================================================
 
 var (
 	globalSkillBackend     *FilesystemSkillBackend
 	globalSkillBackendOnce sync.Once
 )
 
-// GetSkillBackend returns the global singleton skill backend.
+// GetSkillBackend 返回全局技能后端（无项目路径）
 func GetSkillBackend() *FilesystemSkillBackend {
 	globalSkillBackendOnce.Do(func() {
-		globalSkillBackend = NewFilesystemSkillBackend()
+		globalSkillBackend = NewFilesystemSkillBackend("")
 	})
 	return globalSkillBackend
 }
 
-// ---------------------------------------------------------------------------
-// Skill tool handlers for Eino
-// ---------------------------------------------------------------------------
+// GetSkillBackendForSite 返回站点特定的技能后端（含项目级技能）
+func GetSkillBackendForSite(projectRoot string) *FilesystemSkillBackend {
+	projectDir := filepath.Join(projectRoot, "data", "skills")
+	return NewFilesystemSkillBackend(projectDir)
+}
 
-// skillListTool returns the tool info and handler for listing available skills.
+// ================================================================
+//  AI 工具：skill_list / skill_get / skill_reload / skill_save
+// ================================================================
+
 func skillListTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
 		Name: "skill_list",
-		Desc: "列出所有可用的技能(SKILL)。返回每个技能的名称(name)、描述(description)和分类(category)。当用户的任务需要专业指导时，应先用此工具查看可用技能，再调用 skill_get 加载具体内容。",
+		Desc: "列出所有可用的技能(SKILL)。返回每个技能的名称、描述、分类和来源。先查看可用技能，再调用 skill_get 加载具体内容。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		backend := GetSkillBackend()
@@ -350,7 +567,8 @@ func skillListTool() (*schema.ToolInfo, toolHandler) {
 		var sb strings.Builder
 		sb.WriteString("## 📋 可用技能列表\n\n")
 		for _, s := range list {
-			sb.WriteString(fmt.Sprintf("### %s\n", s.Name))
+			fullName := s.Name
+			sb.WriteString(fmt.Sprintf("### %s\n", fullName))
 			sb.WriteString(fmt.Sprintf("- **描述**: %s\n", s.Description))
 			if s.Category != "" {
 				sb.WriteString(fmt.Sprintf("- **分类**: %s\n", s.Category))
@@ -367,32 +585,35 @@ func skillListTool() (*schema.ToolInfo, toolHandler) {
 	}
 }
 
-// skillGetTool returns the tool info and handler for loading a specific skill's content.
 func skillGetTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
 		Name: "skill_get",
-		Desc: "获取指定技能(SKILL)的完整内容。参数: name=技能名称(必填)。返回技能完整说明文档，包含使用步骤、最佳实践和示例。",
+		Desc: "获取指定技能(SKILL)的完整内容，支持变量替换。参数: name=技能名称(必填), arguments=传递给技能的参数(可选)。返回技能完整说明文档。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"name": {
 				Type: schema.String,
-				Desc: "技能名称，必填。应先使用 skill_list 查看可用技能的名称。",
+				Desc: "技能名称，必填。插件技能用 {插件名}:{技能名} 格式。",
+			},
+			"arguments": {
+				Type: schema.String,
+				Desc: "传递给技能的参数（可选），可在模板中用 $ARGUMENTS、$0、$1 等引用",
 			},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		var args struct {
-			Name string `json:"name"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
 		}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
 		if args.Name == "" {
-			return "", fmt.Errorf("参数 name 为必填")
+			return "错误：技能名称不能为空，请先使用 skill_list 查看可用技能。", nil
 		}
-
 		backend := GetSkillBackend()
 		skill, err := backend.Get(ctx, args.Name)
 		if err != nil {
-			// Try fuzzy match
+			// 尝试查找相似技能
 			list, _ := backend.List(ctx)
 			var similar []string
 			for _, s := range list {
@@ -406,32 +627,19 @@ func skillGetTool() (*schema.ToolInfo, toolHandler) {
 			return fmt.Sprintf("未找到技能 %q。请先用 skill_list 查看可用技能列表。", args.Name), nil
 		}
 
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("# %s\n\n", skill.Name))
-		if skill.Description != "" {
-			sb.WriteString(fmt.Sprintf("> %s\n\n", skill.Description))
-		}
-		if skill.Category != "" {
-			sb.WriteString(fmt.Sprintf("**分类**: %s  ", skill.Category))
-		}
-		if skill.Version != "" {
-			sb.WriteString(fmt.Sprintf("**版本**: %s  ", skill.Version))
-		}
-		if !skill.UpdatedAt.IsZero() {
-			sb.WriteString(fmt.Sprintf("**更新**: %s", skill.UpdatedAt.Format("2006-01-02")))
-		}
-		sb.WriteString("\n\n---\n\n")
-		sb.WriteString(skill.Content)
+		// 展开变量
+		expanded := skill.Expand(args.Arguments, "")
 
-		return sb.String(), nil
+		result := fmt.Sprintf("# %s\n\n**描述**: %s\n**来源**: %s\n\n---\n\n%s",
+			skill.FullName(), skill.Description, skill.Source, expanded)
+		return result, nil
 	}
 }
 
-// skillReloadTool returns the tool info and handler for reloading skills from disk.
 func skillReloadTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
 		Name: "skill_reload",
-		Desc: "重新加载所有技能(SKILL)，从 data/skills/ 目录重新扫描 SKILL.md 文件。管理员编辑或新增技能后调用此工具使其生效。",
+		Desc: "重新加载所有技能(SKILL)，从所有技能目录重新扫描。管理员编辑或新增技能后调用此工具使其生效。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		backend := GetSkillBackend()
@@ -443,7 +651,6 @@ func skillReloadTool() (*schema.ToolInfo, toolHandler) {
 	}
 }
 
-// skillSaveTool returns the tool info and handler for creating or updating a skill.
 func skillSaveTool() (*schema.ToolInfo, toolHandler) {
 	return &schema.ToolInfo{
 		Name: "skill_save",
@@ -451,31 +658,31 @@ func skillSaveTool() (*schema.ToolInfo, toolHandler) {
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"name": {
 				Type: schema.String,
-				Desc: "技能名称（必填）。命名建议：使用英文小写+连字符，如 seo-article-optimization。会作为目录名使用。",
+				Desc: "技能名称，应使用英文小写连字符格式，如 seo-analyzer",
 			},
 			"description": {
 				Type: schema.String,
-				Desc: "技能简介（推荐填），简要说明该技能的用途和适用场景。",
+				Desc: "技能描述，一句话说明技能的用途",
 			},
 			"category": {
 				Type: schema.String,
-				Desc: "技能分类（可选），如 SEO、内容、模板、运营等。",
-			},
-			"version": {
-				Type: schema.String,
-				Desc: "版本号（可选），如 1.0.0。",
-			},
-			"author": {
-				Type: schema.String,
-				Desc: "作者（可选）。",
-			},
-			"tags": {
-				Type: schema.String,
-				Desc: "标签（可选），逗号分隔的列表，如 seo,article,optimization。",
+				Desc: "技能分类，如 SEO、写作、运维等",
 			},
 			"content": {
 				Type: schema.String,
-				Desc: "Markdown 正文内容（必填），即技能的具体步骤、说明和指导。",
+				Desc: "技能内容（Markdown 格式）。可在内容中使用 $ARGUMENTS 引用传入的参数",
+			},
+			"tags": {
+				Type: schema.String,
+				Desc: "标签（英文逗号分隔），如 seo, analysis, keyword",
+			},
+			"version": {
+				Type: schema.String,
+				Desc: "版本号，如 1.0",
+			},
+			"author": {
+				Type: schema.String,
+				Desc: "作者",
 			},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
@@ -483,21 +690,26 @@ func skillSaveTool() (*schema.ToolInfo, toolHandler) {
 			Name        string `json:"name"`
 			Description string `json:"description"`
 			Category    string `json:"category"`
+			Content     string `json:"content"`
+			Tags        string `json:"tags"`
 			Version     string `json:"version"`
 			Author      string `json:"author"`
-			Tags        string `json:"tags"`
-			Content     string `json:"content"`
 		}
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
-		if args.Name == "" {
-			return "", fmt.Errorf("参数 name 为必填")
+		if args.Name == "" || args.Content == "" {
+			return "错误：名称和内容不能为空", nil
 		}
-		if args.Content == "" {
-			return "", fmt.Errorf("参数 content 为必填")
+		var tags []string
+		if args.Tags != "" {
+			for _, t := range strings.Split(args.Tags, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					tags = append(tags, t)
+				}
+			}
 		}
-
 		skill := &Skill{
 			SkillFrontMatter: SkillFrontMatter{
 				Name:        args.Name,
@@ -505,18 +717,10 @@ func skillSaveTool() (*schema.ToolInfo, toolHandler) {
 				Category:    args.Category,
 				Version:     args.Version,
 				Author:      args.Author,
+				Tags:        tags,
 			},
 			Content: args.Content,
 		}
-		if args.Tags != "" {
-			for _, t := range strings.Split(args.Tags, ",") {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					skill.Tags = append(skill.Tags, t)
-				}
-			}
-		}
-
 		backend := GetSkillBackend()
 		if err := backend.Save(ctx, skill); err != nil {
 			return "", fmt.Errorf("保存技能失败: %w", err)
@@ -525,23 +729,22 @@ func skillSaveTool() (*schema.ToolInfo, toolHandler) {
 	}
 }
 
-// BuildSkillSystemPrompt returns the skill usage instructions to inject into system prompt.
+// ================================================================
+//  系统提示构建
+// ================================================================
+
+// BuildSkillSystemPrompt 返回技能系统的使用指导
 func BuildSkillSystemPrompt() string {
-	return `
-## 技能系统 (Skills)
+	return `## 技能系统(Skills)
+技能是预设的专业工作流程模板，可在执行专业任务时加载指导。
+- skill_list: 列出所有可用技能
+- skill_get: 加载指定技能的完整内容，支持 $ARGUMENTS 变量替换
+- skill_reload: 管理员编辑技能后重新加载
 
-本系统内置了专业技能(SKILL)，可在处理特定任务时提供结构化指导。
-
-使用方法：
-1. 当用户的任务涉及专业领域（如SEO分析、内容规划、模板定制等）时，先用 skill_list 查看可用技能
-2. 如果找到匹配的技能，调用 skill_get 加载完整内容并遵循其中的步骤
-3. 技能内容可能引用本系统的其他工具，按需调用即可
-
-注意：不要只提技能名称而不实际调用 skill_get 加载。先确定任务，再调 skill_get 获取指导。
-`
+使用 skill_get 加载技能后，技能内容可能引用本系统的其他工具，按需调用即可。`
 }
 
-// BuildSkillToolDescription returns tool descriptions for the skill tools in MCP format.
+// BuildSkillToolDescription 返回技能工具的 MCP 描述
 func BuildSkillToolDescription() string {
 	listTool, _ := skillListTool()
 	getTool, _ := skillGetTool()

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,8 +13,11 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/kataras/iris/v12"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
+	"kandaoni.com/anqicms/config"
 	"kandaoni.com/anqicms/model"
+	"kandaoni.com/anqicms/pkg/ai/eino"
 	"kandaoni.com/anqicms/pkg/mcp/server"
 )
 
@@ -27,35 +31,51 @@ type Turn struct {
 
 // ChatSession represents a user chat session
 type ChatSession struct {
-	ID        string        `json:"id"`
-	Messages  []ChatMessage `json:"messages"`
-	Turns     []Turn        `json:"turns"`
-	CreatedAt time.Time     `json:"created_at"`
+	ID                 string        `json:"id"`
+	Messages           []ChatMessage `json:"messages"`
+	Turns              []Turn        `json:"turns"`
+	CreatedAt          time.Time     `json:"created_at"`
+	CachedSystemPrompt string        `json:"-"` // 每会话缓存一次，保持 prefix cache 稳定
+	DeclaredPackages   []string      `json:"-"` // 模型声明的能力包列表
+	ToolsFinalized     bool          `json:"-"` // true 表示已从声明阶段切换到执行阶段
 }
 
 // ChatMessage represents a message in a conversation
 type ChatMessage struct {
-	Role        string `json:"role"`
-	Content     string `json:"content"`
-	CreatedTime int64  `json:"created_time"`
-	ToolCallID  string `json:"tool_call_id,omitempty"`
-	ToolName    string `json:"tool_name,omitempty"`
-	TurnID      uint   `json:"turn_id,omitempty"`
-	ToolCalls   string `json:"tool_calls,omitempty"`
+	Role        string        `json:"role"`
+	Content     string        `json:"content"`
+	CreatedTime int64         `json:"created_time"`
+	ToolCallID  string        `json:"tool_call_id,omitempty"`
+	ToolName    string        `json:"tool_name,omitempty"`
+	TurnID      uint          `json:"turn_id,omitempty"`
+	ToolCalls   string        `json:"tool_calls,omitempty"`
+	Files       []ChatFileRef `json:"files,omitempty"`
+}
+
+// ChatFileRef represents a reference to an uploaded file
+type ChatFileRef struct {
+	FileName string `json:"file_name"`
+	FilePath string `json:"file_path"`
 }
 
 // AiChatService manages AI chat conversations
 type AiChatService struct {
-	sessions map[string]*ChatSession
-	mu       sync.RWMutex
-	Logger   *slog.Logger
-	mcpSrv   *server.Server
-	db       *gorm.DB
-	site     *Website
+	sessions    map[string]*ChatSession
+	mu          sync.RWMutex
+	Logger      *slog.Logger
+	mcpSrv      *server.Server
+	db          *gorm.DB
+	site        *Website
+	projectRoot string
 
 	// Cached tool definitions and handlers (initialized once)
 	Tools    []*schema.ToolInfo
 	Handlers map[string]toolHandler
+
+	// Agent 调度器
+	agents        map[uint]*model.AiAgent
+	agentsMu      sync.RWMutex
+	schedulerQuit chan struct{}
 }
 
 // NewAiChatService creates a new AI chat service
@@ -65,12 +85,14 @@ func (w *Website) NewAiChatService() *AiChatService {
 		return nil
 	}
 	svc := &AiChatService{
-		mu:       sync.RWMutex{},
-		sessions: make(map[string]*ChatSession),
-		Logger:   slog.Default(),
-		mcpSrv:   mcpServer,
-		db:       w.DB,
-		site:     w,
+		mu:          sync.RWMutex{},
+		sessions:    make(map[string]*ChatSession),
+		Logger:      slog.Default(),
+		mcpSrv:      mcpServer,
+		db:          w.DB,
+		site:        w,
+		projectRoot: w.RootPath,
+		agents:      make(map[uint]*model.AiAgent),
 	}
 
 	// Initialize tools
@@ -84,6 +106,9 @@ func (w *Website) NewAiChatService() *AiChatService {
 	svc.Logger.Info("AI tools initialized", "count", len(svc.Tools))
 	// Load sessions from database on startup
 	svc.loadSessionsFromDB()
+	// Load agents and start scheduler
+	svc.loadAgentsFromDB()
+	svc.StartAgentScheduler()
 	w.AiSrv = svc
 	return svc
 }
@@ -120,15 +145,7 @@ func (svc *AiChatService) loadSessionsFromDB() {
 			Order("created_time ASC").
 			Find(&dbMessages)
 		for _, dbm := range dbMessages {
-			sess.Messages = append(sess.Messages, ChatMessage{
-				Role:        dbm.Role,
-				Content:     dbm.Content,
-				CreatedTime: dbm.CreatedTime,
-				ToolCallID:  dbm.ToolCallID,
-				ToolName:    dbm.ToolName,
-				TurnID:      dbm.TurnID,
-				ToolCalls:   dbm.ToolCalls,
-			})
+			sess.Messages = append(sess.Messages, dbMessageToChatMessage(dbm))
 		}
 		rebuildTurns(sess)
 		svc.sessions[row.SessionId] = sess
@@ -159,14 +176,7 @@ func (svc *AiChatService) GetOrCreateSession(sessionID string) *ChatSession {
 				CreatedAt: time.Unix(dbMessages[0].CreatedTime, 0),
 			}
 			for _, dbm := range dbMessages {
-				sess.Messages = append(sess.Messages, ChatMessage{
-					Role:        dbm.Role,
-					Content:     dbm.Content,
-					CreatedTime: dbm.CreatedTime,
-					ToolCallID:  dbm.ToolCallID,
-					ToolName:    dbm.ToolName,
-					TurnID:      dbm.TurnID,
-				})
+				sess.Messages = append(sess.Messages, dbMessageToChatMessage(dbm))
 			}
 			rebuildTurns(sess)
 			svc.sessions[sessionID] = sess
@@ -228,6 +238,7 @@ func (svc *AiChatService) AddMessage(sessionID string, msg ChatMessage) {
 	// Persist to database asynchronously
 	if svc.db != nil {
 		go func() {
+			filesJSON, _ := json.Marshal(msg.Files)
 			dbMsg := &model.AiChatMessage{
 				SessionId:  sessionID,
 				Role:       msg.Role,
@@ -236,12 +247,34 @@ func (svc *AiChatService) AddMessage(sessionID string, msg ChatMessage) {
 				ToolName:   msg.ToolName,
 				TurnID:     msg.TurnID,
 				ToolCalls:  msg.ToolCalls,
+				Files:      string(filesJSON),
 			}
 			if err := svc.db.Create(dbMsg).Error; err != nil {
 				svc.Logger.Error("Failed to persist chat message", "error", err)
 			}
 		}()
 	}
+}
+
+// dbMessageToChatMessage converts a database AiChatMessage to a ChatMessage,
+// parsing the Files JSON field if present.
+func dbMessageToChatMessage(dbm model.AiChatMessage) ChatMessage {
+	msg := ChatMessage{
+		Role:        dbm.Role,
+		Content:     dbm.Content,
+		CreatedTime: dbm.CreatedTime,
+		ToolCallID:  dbm.ToolCallID,
+		ToolName:    dbm.ToolName,
+		TurnID:      dbm.TurnID,
+		ToolCalls:   dbm.ToolCalls,
+	}
+	if dbm.Files != "" {
+		var files []ChatFileRef
+		if err := json.Unmarshal([]byte(dbm.Files), &files); err == nil {
+			msg.Files = files
+		}
+	}
+	return msg
 }
 
 // rebuildTurns rebuilds the TurnTracker from the session's message list.
@@ -283,15 +316,7 @@ func (svc *AiChatService) GetMessages(sessionID string) []ChatMessage {
 					CreatedAt: time.Unix(dbMessages[0].CreatedTime, 0),
 				}
 				for _, dbm := range dbMessages {
-					sess.Messages = append(sess.Messages, ChatMessage{
-						Role:        dbm.Role,
-						Content:     dbm.Content,
-						CreatedTime: dbm.CreatedTime,
-						ToolCallID:  dbm.ToolCallID,
-						ToolName:    dbm.ToolName,
-						TurnID:      dbm.TurnID,
-						ToolCalls:   dbm.ToolCalls,
-					})
+					sess.Messages = append(sess.Messages, dbMessageToChatMessage(dbm))
 				}
 				rebuildTurns(sess)
 				svc.sessions[sessionID] = sess
@@ -318,23 +343,32 @@ func (svc *AiChatService) ListSessions() []iris.Map {
 	var result []iris.Map
 	for id, sess := range svc.sessions {
 		lastMsg := ""
+		title := ""
 		if len(sess.Messages) > 0 {
 			lastMsg = sess.Messages[len(sess.Messages)-1].Content
 			if len([]rune(lastMsg)) > 100 {
 				lastMsg = string([]rune(lastMsg)[:100]) + "..."
 			}
+			// Find first user message as title
+			for _, msg := range sess.Messages {
+				if msg.Role == "user" {
+					title = msg.Content
+					if len([]rune(title)) > 50 {
+						title = string([]rune(title)[:50]) + "..."
+					}
+					break
+				}
+			}
 		}
 		result = append(result, iris.Map{
 			"session_id":   id,
-			"created_at":   sess.CreatedAt.Unix(),
+			"title":        title,
+			"created_time": sess.CreatedAt.Unix(),
 			"updated_at":   sess.Messages[len(sess.Messages)-1].CreatedTime,
 			"msg_count":    len(sess.Messages),
 			"last_message": lastMsg,
 		})
 	}
-	// Sort by updated_at descending (most recent first)
-	// Convert to slice of iris.Map and sort
-	// Actually, just return unsorted for now — the frontend can sort
 	return result
 }
 
@@ -343,6 +377,293 @@ func (svc *AiChatService) CloseSession(sessionID string) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
 	delete(svc.sessions, sessionID)
+}
+
+// ================================================================
+//  Agent 调度器
+// ================================================================
+
+// loadAgentsFromDB 从数据库加载所有启用的 Agent 到内存
+func (svc *AiChatService) loadAgentsFromDB() {
+	if svc.db == nil {
+		return
+	}
+	var agents []model.AiAgent
+	svc.db.Where("enabled = 1").Find(&agents)
+	svc.agentsMu.Lock()
+	for i := range agents {
+		svc.agents[agents[i].Id] = &agents[i]
+	}
+	svc.agentsMu.Unlock()
+	svc.Logger.Info("Loaded AI agents from DB", "count", len(agents))
+}
+
+// StartAgentScheduler 启动后台调度器 goroutine，每 30 秒检查一次到期 Agent
+func (svc *AiChatService) StartAgentScheduler() {
+	svc.schedulerQuit = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				svc.checkDueAgents()
+			case <-svc.schedulerQuit:
+				return
+			}
+		}
+	}()
+	svc.Logger.Info("Agent scheduler started")
+}
+
+// StopAgentScheduler 停止后台调度器
+func (svc *AiChatService) StopAgentScheduler() {
+	if svc.schedulerQuit != nil {
+		close(svc.schedulerQuit)
+		svc.schedulerQuit = nil
+	}
+}
+
+// checkDueAgents 检查并执行到期的 Agent
+func (svc *AiChatService) checkDueAgents() {
+	// 先检查是否配置了ai
+	oldCfg := eino.GlobalConfig()
+	if oldCfg == nil {
+		// 未配置，直接返回
+		// 需要检查默认配置
+		defaultSite := CurrentSite(nil)
+		aiSetting := defaultSite.LoadAiSetting("")
+		if len(aiSetting.Configs) > 0 && !strings.HasPrefix(aiSetting.LastModel, "anqi") {
+			// 进行配置
+			var cfg *eino.Config
+			if aiSetting.LastModel != "" {
+				for _, v := range aiSetting.Configs {
+					if v.Model == aiSetting.LastModel {
+						cfg = v
+						break
+					}
+				}
+			}
+			if cfg == nil {
+				cfg = aiSetting.Configs[0]
+			}
+			if err := eino.SetGlobalConfig(cfg); err != nil {
+				slog.Error("Failed to initialize AI client", "error", err)
+				return
+			} else {
+				slog.Info("AI client initialized successfully")
+			}
+		} else if config.AnqiUser.AuthId > 0 {
+			if err := eino.SetOfficialConfig(aiSetting.LastModel); err != nil {
+				slog.Error("Failed to initialize AI client", "error", err)
+				return
+			} else {
+				slog.Info("AI client initialized successfully")
+			}
+		} else {
+			// 配置错误，直接返回
+			return
+		}
+	}
+	now := time.Now().Unix()
+	svc.agentsMu.RLock()
+	var dueList []*model.AiAgent
+	for _, agent := range svc.agents {
+		if agent.Enabled == 1 && agent.NextRunAt > 0 && agent.NextRunAt <= now {
+			dueList = append(dueList, agent)
+		}
+	}
+	svc.agentsMu.RUnlock()
+
+	for _, agent := range dueList {
+		svc.Logger.Info("Agent due, executing", "id", agent.Id, "name", agent.Name)
+		go func(a *model.AiAgent) {
+			if _, err := svc.ExecuteAgent(a); err != nil {
+				svc.Logger.Error("Agent execution failed", "id", a.Id, "error", err)
+			}
+		}(agent)
+	}
+}
+
+// ExecuteAgent 执行 Agent 的任务（非流式 LLM 调用 + 工具循环）
+func (svc *AiChatService) ExecuteAgent(agent *model.AiAgent) (string, error) {
+	// 创建执行日志
+	logEntry := &model.AiAgentLog{
+		AgentId:   agent.Id,
+		SessionId: agent.SessionId,
+		Status:    0, // 执行中
+		StartedAt: time.Now().Unix(),
+	}
+	if svc.db != nil {
+		svc.db.Create(logEntry)
+	}
+
+	updateLog := func(status int, summary, errMsg string) {
+		logEntry.Status = status
+		logEntry.Summary = summary
+		logEntry.Error = errMsg
+		logEntry.FinishedAt = time.Now().Unix()
+		if svc.db != nil {
+			svc.db.Save(logEntry)
+		}
+	}
+
+	// 构建系统提示
+	systemPrompt := `你是一个 AnQiCMS 的 AI 智能体，需要独立完成任务。
+
+## 任务策略
+` + agent.Strategy + `
+
+## 规则
+1. 每次执行时，按照策略自主调用工具完成工作，不要询问用户意见
+2. 执行完每个修改操作后，需要验证结果
+3. 全部完成后，用中文总结你做了什么、结果如何`
+
+	// 获取 Eino client
+	client, err := eino.GetClient()
+	if err != nil {
+		updateLog(2, "", err.Error())
+		return "", fmt.Errorf("AI client not available: %w", err)
+	}
+
+	// 绑定工具
+	if len(svc.Tools) > 0 {
+		if err := client.BindTools(svc.Tools); err != nil {
+			updateLog(2, "", err.Error())
+			return "", fmt.Errorf("failed to bind tools: %w", err)
+		}
+	}
+
+	// 构建消息：历史上下文 + 执行指令
+	messages := svc.BuildToolMessages(agent.SessionId, systemPrompt)
+	triggerMsg := "现在开始执行任务。执行完毕后用中文总结。"
+	messages = append(messages, schema.UserMessage(triggerMsg))
+
+	maxRounds := 20
+	var finalResponse string
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	for round := 0; round < maxRounds; round++ {
+		// 检查超时
+		select {
+		case <-ctx.Done():
+			updateLog(2, "", ctx.Err().Error())
+			return "", ctx.Err()
+		default:
+		}
+
+		// 调用 LLM
+		msg, err := client.Generate(ctx, messages)
+		if err != nil {
+			if IsContextOverflowError(err) {
+				messages = CompactMessages(messages, 5)
+				continue
+			}
+			updateLog(2, "", err.Error())
+			return "", fmt.Errorf("AI generate failed: %w", err)
+		}
+
+		// 无工具调用 → 本轮为最终回复
+		if len(msg.ToolCalls) == 0 {
+			finalResponse = msg.Content
+			break
+		}
+
+		messages = append(messages, msg)
+
+		// 保存 assistant 消息到会话历史
+		toolCallsJSON, _ := json.Marshal(msg.ToolCalls)
+		svc.AddMessage(agent.SessionId, ChatMessage{
+			Role:      "assistant",
+			Content:   msg.Content,
+			ToolCalls: string(toolCallsJSON),
+		})
+
+		// 执行每个工具
+		for _, tc := range msg.ToolCalls {
+			toolName := tc.Function.Name
+			argsJSON := tc.Function.Arguments
+
+			handler, exists := svc.Handlers[toolName]
+			var result string
+			if !exists {
+				result = fmt.Sprintf("错误：未知工具 %s", toolName)
+			} else {
+				result, err = handler(ctx, argsJSON)
+				if err != nil {
+					result = fmt.Sprintf("工具执行错误: %s", err.Error())
+				}
+			}
+
+			toolMsg := schema.ToolMessage(result, tc.ID)
+			messages = append(messages, toolMsg)
+			logEntry.ToolCalls++
+
+			// 保存工具结果到会话历史
+			svc.AddMessage(agent.SessionId, ChatMessage{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: tc.ID,
+				ToolName:   toolName,
+			})
+		}
+
+		// 上下文压缩：每 3 轮压缩一次
+		if len(messages) > 12 && round%3 == 2 {
+			messages = CompactMessages(messages, 5)
+		}
+	}
+
+	// 更新 Agent 状态
+	svc.agentsMu.Lock()
+	agent.LastRunAt = time.Now().Unix()
+	agent.LastSummary = finalResponse
+	agent.RunCount++
+	// 计算下次执行时间
+	if agent.CronExpr != "" {
+		scheduler, err := cron.ParseStandard(agent.CronExpr)
+		if err == nil {
+			agent.NextRunAt = scheduler.Next(time.Now()).Unix()
+		}
+	}
+	if agent.MaxRuns > 0 && agent.RunCount >= agent.MaxRuns {
+		agent.Enabled = 0
+	}
+	svc.agentsMu.Unlock()
+
+	// 持久化到 DB
+	if svc.db != nil {
+		svc.db.Model(&model.AiAgent{}).Where("id = ?", agent.Id).Updates(map[string]interface{}{
+			"last_run_at":  agent.LastRunAt,
+			"last_summary": finalResponse,
+			"run_count":    agent.RunCount,
+			"next_run_at":  agent.NextRunAt,
+			"enabled":      agent.Enabled,
+		})
+	}
+
+	updateLog(1, finalResponse, "")
+	return finalResponse, nil
+}
+
+// GetAgent 根据 ID 获取 Agent
+func (svc *AiChatService) GetAgent(id uint) *model.AiAgent {
+	svc.agentsMu.RLock()
+	defer svc.agentsMu.RUnlock()
+	return svc.agents[id]
+}
+
+// GetAgentBySessionID 根据 SessionID 查找 Agent
+func (svc *AiChatService) GetAgentBySessionID(sessionID string) *model.AiAgent {
+	svc.agentsMu.RLock()
+	defer svc.agentsMu.RUnlock()
+	for _, agent := range svc.agents {
+		if agent.SessionId == sessionID {
+			return agent
+		}
+	}
+	return nil
 }
 
 // GetAllTools returns all available MCP tools, built from the Eino tool definitions.
@@ -826,30 +1147,30 @@ func IsContextOverflowError(err error) bool {
 // HasWriteOperation checks if any of the tool names is a write operation.
 func HasWriteOperation(toolNames []string) bool {
 	writeOps := map[string]bool{
-		"archive_create":      true,
-		"archive_update":      true,
-		"archive_delete":      true,
-		"category_create":     true,
-		"category_update":     true,
-		"category_delete":     true,
-		"page_create":         true,
-		"page_update":         true,
-		"page_delete":         true,
-		"module_create":       true,
-		"module_update":       true,
-		"module_delete":       true,
-		"tag_create":          true,
-		"tag_update":          true,
-		"tag_delete":          true,
-		"archive_publish":     true,
-		"archive_tag_update":  true,
-		"attachment_upload":   true,
-		"attachment_delete":   true,
-		"write_file":          true,
-		"edit_file":           true,
-		"create_file":         true,
-		"search_replace":      true,
-		"bash":                true,
+		"archive_create":     true,
+		"archive_update":     true,
+		"archive_delete":     true,
+		"category_create":    true,
+		"category_update":    true,
+		"category_delete":    true,
+		"page_create":        true,
+		"page_update":        true,
+		"page_delete":        true,
+		"module_create":      true,
+		"module_update":      true,
+		"module_delete":      true,
+		"tag_create":         true,
+		"tag_update":         true,
+		"tag_delete":         true,
+		"archive_publish":    true,
+		"archive_tag_update": true,
+		"attachment_upload":  true,
+		"attachment_delete":  true,
+		"write_file":         true,
+		"edit_file":          true,
+		"create_file":        true,
+		"search_replace":     true,
+		"bash":               true,
 	}
 	for _, name := range toolNames {
 		if writeOps[name] {

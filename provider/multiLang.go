@@ -994,7 +994,12 @@ func (w *Website) GetOrSetMultiLangCache(uri string, lang string, params map[str
 		IgnoreClass: []string{"languages", "language"},
 		IgnoreId:    []string{"languages", "language"},
 	}
-	result, err := w.AnqiTranslateHtml(req)
+	var result string
+	if w.PluginTranslate.Engine == config.TranslateEngineDefault {
+		result, err = w.AnqiTranslateHtml(req)
+	} else {
+		result, err = w.TranslateHtml(string(buf), w.System.Language, lang)
+	}
 	if err != nil {
 		// 如果翻译失败，则回退到原始内容
 		log.Println("translate html failed:", err)

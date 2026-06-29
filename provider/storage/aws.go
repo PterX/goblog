@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -159,7 +161,7 @@ func (s *AwsS3Storage) Put(ctx context.Context, key string, r io.Reader) error {
 		return err
 	}
 	req.Host = s.host()
-	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Content-Type", mime.TypeByExtension(path.Ext(key)))
 
 	s.sign(req, bodyHash)
 

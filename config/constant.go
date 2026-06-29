@@ -216,4 +216,7 @@ const (
 const (
 	PlaceUrlTypeSubdomain = "subdomain"
 	PlaceUrlTypeDirectory = "directory"
+
+	PlaceContentTypeDefault = ""
+	PlaceContentTypeFull    = "full"
 )

@@ -4,14 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 	"kandaoni.com/anqicms/config"
 	"kandaoni.com/anqicms/model"
+	"kandaoni.com/anqicms/pkg/ai/eino"
 	"kandaoni.com/anqicms/provider/fulltext"
 	"kandaoni.com/anqicms/request"
 	"kandaoni.com/anqicms/response"
@@ -419,7 +424,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 	add(&schema.ToolInfo{
 		Name:        "module_list",
 		Desc:        "获取自定义模型列表，返回所有模型的ID、名称、表名和URL别名等信息。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil || w.DB == nil {
@@ -942,7 +947,7 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 	add(&schema.ToolInfo{
 		Name:        "page_list",
 		Desc:        "获取页面列表，返回所有页面的ID和标题。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil || w.DB == nil {
@@ -1737,9 +1742,9 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 
 	add(&schema.ToolInfo{
 		Name: "attachment_upload",
-		Desc: "通过远程URL上传附件（图片）到站点。AI无法直接上传本地文件，只能从网络URL下载。",
+		Desc: "通过远程URL或本地文件路径上传附件（图片）到站点。本地文件路径通常是AI聊天上传按钮上传的临时文件路径（file_path）。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"url":       {Type: schema.String, Desc: "图片的远程URL地址", Required: true},
+			"url":       {Type: schema.String, Desc: "图片的远程URL地址，或本地文件路径（绝对路径或基于站点项目目录的相对路径）", Required: true},
 			"file_name": {Type: schema.String, Desc: "保存的文件名（不含扩展名），可选"},
 		}),
 	}, func(ctx context.Context, argsJSON string) (string, error) {
@@ -1757,9 +1762,51 @@ func (svc *AiChatService) getEinoTools() ([]*schema.ToolInfo, map[string]toolHan
 		if w == nil || w.DB == nil {
 			return "错误：站点未初始化", nil
 		}
-		attachment, err := w.DownloadRemoteImage(args.URL, args.FileName, 0)
-		if err != nil {
-			return "", fmt.Errorf("上传附件失败: %w", err)
+		var attachment *model.Attachment
+		// 判断是否为本地文件路径
+		if strings.HasPrefix(args.URL, "http://") || strings.HasPrefix(args.URL, "https://") {
+			// 远程URL下载
+			var err error
+			attachment, err = w.DownloadRemoteImage(args.URL, args.FileName, 0)
+			if err != nil {
+				return "", fmt.Errorf("上传附件失败: %w", err)
+			}
+		} else {
+			// 本地文件路径
+			localPath := args.URL
+			if !filepath.IsAbs(localPath) {
+				localPath = filepath.Join(svc.projectRoot, localPath)
+			}
+			// 安全检查：防止路径遍历
+			localPath, err := filepath.Abs(localPath)
+			if err != nil {
+				return "", fmt.Errorf("无法解析路径: %w", err)
+			}
+			if svc.projectRoot != "" && !strings.HasPrefix(localPath, svc.projectRoot) {
+				return "", fmt.Errorf("路径超出项目目录范围: %s", localPath)
+			}
+			// 打开文件
+			file, err := os.Open(localPath)
+			if err != nil {
+				return "", fmt.Errorf("无法打开文件: %w", err)
+			}
+			defer file.Close()
+			stat, err := file.Stat()
+			if err != nil {
+				return "", fmt.Errorf("无法获取文件信息: %w", err)
+			}
+			fileName := args.FileName
+			if fileName == "" {
+				fileName = strings.TrimSuffix(stat.Name(), filepath.Ext(stat.Name()))
+			}
+			fileHeader := &multipart.FileHeader{
+				Filename: stat.Name(),
+				Size:     stat.Size(),
+			}
+			attachment, err = w.AttachmentUpload(file, fileHeader, 0, 0, 0)
+			if err != nil {
+				return "", fmt.Errorf("上传附件失败: %w", err)
+			}
 		}
 		attachment.GetThumb(w.PluginStorage.StorageUrl)
 		return fmt.Sprintf("附件上传成功！ID: %d\n文件名: %s\nURL: %s", attachment.Id, attachment.FileName, attachment.Logo), nil
@@ -2182,7 +2229,7 @@ SEO信息：
 	add(&schema.ToolInfo{
 		Name:        "version",
 		Desc:        "查看当前系统版本号和试用状态。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		trial := "否"
 		if config.Trial {
@@ -2193,7 +2240,7 @@ SEO信息：
 	add(&schema.ToolInfo{
 		Name:        "anqi_info",
 		Desc:        "查看安企CMS授权登录信息，包括是否已登录、会员到期时间等。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil {
@@ -2228,7 +2275,7 @@ SEO信息：
 	add(&schema.ToolInfo{
 		Name:        "setting_system",
 		Desc:        "查看系统设置，包括站点名称、Logo、备案号、网址、语言等基础配置。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil {
@@ -2341,7 +2388,7 @@ ICP备案: %s
 	add(&schema.ToolInfo{
 		Name:        "setting_contact",
 		Desc:        "查看联系方式设置，包括联系人、电话、地址、邮箱、微信、QQ等。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil {
@@ -2453,7 +2500,7 @@ Youtube: %s
 	add(&schema.ToolInfo{
 		Name:        "setting_diy_field",
 		Desc:        "查看自定义字段设置，返回所有自定义字段的配置信息。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil {
@@ -2519,7 +2566,7 @@ Youtube: %s
 	add(&schema.ToolInfo{
 		Name:        "setting_index",
 		Desc:        "查看首页TDK设置（SEO标题、关键词、描述）。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil {
@@ -2573,7 +2620,7 @@ SEO描述: %s
 	add(&schema.ToolInfo{
 		Name:        "setting_content",
 		Desc:        "查看内容设置，包括远程下载、过滤外链、URL模式、缩略图、编辑器等。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil {
@@ -2674,7 +2721,7 @@ SEO描述: %s
 	add(&schema.ToolInfo{
 		Name:        "setting_safe",
 		Desc:        "查看内容安全设置，包括验证码、频率限制、内容过滤、IP黑名单等。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		w := svc.site
 		if w == nil {
@@ -2746,7 +2793,7 @@ API发布: %d
 	add(&schema.ToolInfo{
 		Name:        "setting_migrate_db",
 		Desc:        "更新数据库表结构，自动同步模型字段变更到数据库。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(nil),
+		// ParamsOneOf left nil intentionally: no parameters needed
 	}, func(ctx context.Context, argsJSON string) (string, error) {
 		if svc.site == nil {
 			return "错误：站点未初始化", nil
@@ -3740,11 +3787,507 @@ API发布: %d
 		return b.String(), nil
 	})
 
-	// ---- Skill tools (progressive disclosure) ----
+	// ---- Agent 管理工具 ----
+	add(&schema.ToolInfo{
+		Name: "agent_create",
+		Desc: "创建一个 AI 智能体（Agent），拥有独立的会话和记忆，可定时执行任务。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"name":     {Type: schema.String, Desc: "智能体名称，如 '每日热词写作'", Required: true},
+			"strategy": {Type: schema.String, Desc: "执行策略。描述每次执行时需要做什么，包括步骤、标准、输出要求。如 '每天搜索互联网热词，据此写3篇文章并发布'", Required: true},
+			"cron":     {Type: schema.String, Desc: "Cron 表达式，如 '0 8 * * *' 表示每天8点执行。留空表示仅手动触发"},
+			"max_runs": {Type: schema.Integer, Desc: "最大执行次数，0=不限（默认0）"},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Name     string `json:"name"`
+			Strategy string `json:"strategy"`
+			Cron     string `json:"cron"`
+			MaxRuns  int    `json:"max_runs"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Name == "" || args.Strategy == "" {
+			return "错误：名称和策略不能为空", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+
+		agent := &model.AiAgent{
+			Name:      args.Name,
+			Strategy:  args.Strategy,
+			CronExpr:  args.Cron,
+			MaxRuns:   args.MaxRuns,
+			Enabled:   1,
+			SessionId: "", // 创建后分配
+		}
+		if err := w.DB.Create(agent).Error; err != nil {
+			return "", fmt.Errorf("创建智能体失败: %w", err)
+		}
+		// 分配专属会话 ID
+		agent.SessionId = fmt.Sprintf("agent_%d", agent.Id)
+		w.DB.Model(agent).Update("session_id", agent.SessionId)
+
+		// 如果有 cron 表达式，计算首次执行时间
+		if agent.CronExpr != "" {
+			scheduler, err := cron.ParseStandard(agent.CronExpr)
+			if err == nil {
+				agent.NextRunAt = scheduler.Next(time.Now()).Unix()
+				w.DB.Model(agent).Update("next_run_at", agent.NextRunAt)
+			}
+		}
+
+		// 加入内存缓存
+		svc.agentsMu.Lock()
+		svc.agents[agent.Id] = agent
+		svc.agentsMu.Unlock()
+
+		return fmt.Sprintf("智能体创建成功！ID: %d\n名称: %s\n策略: %s\nCron: %s\n会话ID: %s",
+			agent.Id, agent.Name, agent.Strategy, agent.CronExpr, agent.SessionId), nil
+	})
+	add(&schema.ToolInfo{
+		Name:        "agent_list",
+		Desc:        "查看所有 AI 智能体列表，包含状态、上次运行时间、运行次数。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		var agents []model.AiAgent
+		w.DB.Order("id ASC").Find(&agents)
+		if len(agents) == 0 {
+			return "暂无智能体。使用 `agent_create` 创建一个。", nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("共 %d 个智能体：\n\n", len(agents)))
+		for _, a := range agents {
+			enabledStr := "✅ 运行中"
+			if a.Enabled == 0 {
+				enabledStr = "⏸ 已暂停"
+			}
+			lastRun := "从未"
+			if a.LastRunAt > 0 {
+				lastRun = time.Unix(a.LastRunAt, 0).Format("2006-01-02 15:04")
+			}
+			cronStr := a.CronExpr
+			if cronStr == "" {
+				cronStr = "仅手动"
+			}
+			b.WriteString(fmt.Sprintf("#%d | %s | %s\n", a.Id, a.Name, enabledStr))
+			b.WriteString(fmt.Sprintf("  策略: %s\n", truncate(a.Strategy, 100)))
+			b.WriteString(fmt.Sprintf("  Cron: %s | 上次: %s | 运行: %d次\n", cronStr, lastRun, a.RunCount))
+		}
+		return b.String(), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "agent_delete",
+		Desc: "删除指定 AI 智能体及其所有执行日志。不可恢复。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "智能体ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args ArgId
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id <= 0 {
+			return "错误：ID必须大于0", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		var agent model.AiAgent
+		if err := w.DB.Where("id = ?", args.Id).First(&agent).Error; err != nil {
+			return "错误：智能体不存在", nil
+		}
+		// 删除执行日志
+		w.DB.Where("agent_id = ?", args.Id).Delete(&model.AiAgentLog{})
+		// 删除 Agent
+		w.DB.Delete(&agent)
+		// 从内存缓存移除
+		svc.agentsMu.Lock()
+		delete(svc.agents, uint(args.Id))
+		svc.agentsMu.Unlock()
+		return fmt.Sprintf("智能体 #%d 已删除", args.Id), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "agent_toggle",
+		Desc: "暂停或恢复一个 AI 智能体。暂停后不会定时执行。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":      {Type: schema.Integer, Desc: "智能体ID", Required: true},
+			"enabled": {Type: schema.Integer, Desc: "1=启用(运行中)，0=暂停", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Id      int `json:"id"`
+			Enabled int `json:"enabled"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id <= 0 {
+			return "错误：ID必须大于0", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		var agent model.AiAgent
+		if err := w.DB.Where("id = ?", args.Id).First(&agent).Error; err != nil {
+			return "错误：智能体不存在", nil
+		}
+		enabled := 0
+		if args.Enabled == 1 {
+			enabled = 1
+		}
+		w.DB.Model(&agent).Update("enabled", enabled)
+		svc.agentsMu.Lock()
+		if existing, ok := svc.agents[uint(args.Id)]; ok {
+			existing.Enabled = enabled
+		}
+		svc.agentsMu.Unlock()
+		status := "已暂停"
+		if enabled == 1 {
+			status = "运行中"
+		}
+		return fmt.Sprintf("智能体 #%d 状态已更改为: %s", args.Id, status), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "agent_run",
+		Desc: "手动触发一个 AI 智能体立即执行一次任务。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id": {Type: schema.Integer, Desc: "智能体ID", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args ArgId
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id <= 0 {
+			return "错误：ID必须大于0", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		svc.agentsMu.RLock()
+		agent, exists := svc.agents[uint(args.Id)]
+		svc.agentsMu.RUnlock()
+		if !exists {
+			return "错误：智能体不存在或未加载", nil
+		}
+		result, err := svc.ExecuteAgent(agent)
+		if err != nil {
+			return fmt.Sprintf("智能体 #%d 执行失败: %s", args.Id, err.Error()), nil
+		}
+		return fmt.Sprintf("智能体 #%d 执行完成！\n\n执行结果:\n%s", args.Id, result), nil
+	})
+	add(&schema.ToolInfo{
+		Name: "agent_chat",
+		Desc: "与指定 AI 智能体的专属会话对话。可以查看它的执行历史、调整策略、询问进度等。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"id":      {Type: schema.Integer, Desc: "智能体ID", Required: true},
+			"message": {Type: schema.String, Desc: "发送给智能体的消息", Required: true},
+		}),
+	}, func(ctx context.Context, argsJSON string) (string, error) {
+		var args struct {
+			Id      int    `json:"id"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+			return "", fmt.Errorf("无法解析参数: %w", err)
+		}
+		if args.Id <= 0 || args.Message == "" {
+			return "错误：ID和消息不能为空", nil
+		}
+		w := svc.site
+		if w == nil || w.DB == nil {
+			return "错误：站点未初始化", nil
+		}
+		svc.agentsMu.RLock()
+		agent, exists := svc.agents[uint(args.Id)]
+		svc.agentsMu.RUnlock()
+		if !exists {
+			return "错误：智能体不存在或未加载", nil
+		}
+
+		// 获取 Eino client
+		client, err := eino.GetClient()
+		if err != nil {
+			return "", fmt.Errorf("AI client not available: %w", err)
+		}
+		if len(svc.Tools) > 0 {
+			if err := client.BindTools(svc.Tools); err != nil {
+				return "", fmt.Errorf("failed to bind tools: %w", err)
+			}
+		}
+
+		// 构建消息：Agent 的历史上下文 + 用户消息
+		systemPrompt := `你是 AnQiCMS 的 AI 智能体。以下是你的策略和对话历史。
+用户正在与你对话，请回答问题并可以执行工具。`
+
+		if agent.Strategy != "" {
+			systemPrompt += "\n\n## 你的策略\n" + agent.Strategy
+		}
+		if agent.LastSummary != "" {
+			systemPrompt += "\n\n## 上次执行摘要\n" + agent.LastSummary
+		}
+
+		messages := svc.BuildToolMessages(agent.SessionId, systemPrompt)
+		messages = append(messages, schema.UserMessage(args.Message))
+
+		// 非流式调用，单轮回复
+		msg, err := client.Generate(ctx, messages)
+		if err != nil {
+			return "", fmt.Errorf("AI generate failed: %w", err)
+		}
+
+		// 保存到会话历史
+		svc.AddMessage(agent.SessionId, ChatMessage{
+			Role:    "user",
+			Content: args.Message,
+		})
+		svc.AddMessage(agent.SessionId, ChatMessage{
+			Role:    "assistant",
+			Content: msg.Content,
+		})
+
+		return msg.Content, nil
+	})
 	add(skillListTool())
 	add(skillGetTool())
 	add(skillReloadTool())
 	add(skillSaveTool())
 
 	return tools, handlers
+}
+
+// ── 能力包系统 ──
+// 能力包常量
+const (
+	CapabilityContent   = "content"   // 文档、分类、标签、附件、评论
+	CapabilityStructure = "structure" // 页面、导航、友链、模块、重定向
+	CapabilityDesign    = "design"    // 模板文件、静态文件、锚文本
+	CapabilitySEO       = "seo"       // 关键词、站点地图、统计
+	CapabilityAdmin     = "admin"     // 系统设置、插件、用户、订单
+	CapabilityAgent     = "agent"     // Agent 管理
+	CapabilityUniversal = "universal" // 始终需要的通用工具
+)
+
+// toolCapabilityMapping 工具名称 → 能力包列表
+// 一个工具可属于多个包（如 category_list 同时用于内容管理和结构管理）
+var toolCapabilityMapping = map[string][]string{
+	// === content ===
+	"archive_list":      {CapabilityContent},
+	"archive_get":       {CapabilityContent},
+	"archive_create":    {CapabilityContent},
+	"archive_delete":    {CapabilityContent},
+	"archive_publish":   {CapabilityContent},
+	"archive_update":    {CapabilityContent},
+	"archive_tag_update": {CapabilityContent},
+	"category_list":     {CapabilityContent, CapabilityStructure},
+	"category_get":      {CapabilityContent, CapabilityStructure},
+	"category_create":   {CapabilityContent},
+	"category_delete":   {CapabilityContent},
+	"category_update":   {CapabilityContent},
+	"tag_list":          {CapabilityContent},
+	"tag_get":           {CapabilityContent},
+	"tag_create":        {CapabilityContent},
+	"tag_delete":        {CapabilityContent},
+	"tag_update":        {CapabilityContent},
+	"attachment_list":   {CapabilityContent},
+	"attachment_get":    {CapabilityContent},
+	"attachment_upload": {CapabilityContent},
+	"attachment_delete": {CapabilityContent},
+	"comment_list":      {CapabilityContent},
+	"comment_approve":   {CapabilityContent},
+	"comment_delete":    {CapabilityContent},
+
+	// === structure ===
+	"page_list":    {CapabilityStructure},
+	"page_get":     {CapabilityStructure},
+	"page_create":  {CapabilityStructure},
+	"page_delete":  {CapabilityStructure},
+	"page_update":  {CapabilityStructure},
+	"module_list":  {CapabilityStructure},
+	"module_get":   {CapabilityStructure},
+	"module_create": {CapabilityStructure},
+	"module_delete": {CapabilityStructure},
+	"module_update": {CapabilityStructure},
+	"nav_list":     {CapabilityStructure},
+	"nav_create":   {CapabilityStructure},
+	"nav_delete":   {CapabilityStructure},
+	"nav_update":   {CapabilityStructure},
+	"friendlink_list":  {CapabilityStructure},
+	"friendlink_create": {CapabilityStructure},
+	"friendlink_delete": {CapabilityStructure},
+	"redirect_list":  {CapabilityStructure},
+	"redirect_create": {CapabilityStructure},
+
+	// === design ===
+	"template_get_info":     {CapabilityDesign},
+	"template_get_file":     {CapabilityDesign},
+	"template_modify_file":  {CapabilityDesign},
+	"template_get_static":   {CapabilityDesign},
+	"template_modify_static": {CapabilityDesign},
+	"template_reload":       {CapabilityDesign},
+	"anchor_list":   {CapabilityDesign},
+	"anchor_create": {CapabilityDesign},
+	"anchor_delete": {CapabilityDesign},
+
+	// === seo ===
+	"keyword_list":   {CapabilitySEO},
+	"keyword_create": {CapabilitySEO},
+	"keyword_delete": {CapabilitySEO},
+	"sitemap_rebuild": {CapabilitySEO},
+	"url_push":       {CapabilitySEO},
+	"statistic_dashboard": {CapabilitySEO},
+	"statistic_spider":    {CapabilitySEO},
+	"statistic_traffic":   {CapabilitySEO},
+
+	// === admin ===
+	"setting_system":      {CapabilityAdmin},
+	"setting_system_form": {CapabilityAdmin},
+	"setting_contact":      {CapabilityAdmin},
+	"setting_contact_form": {CapabilityAdmin},
+	"setting_diy_field":    {CapabilityAdmin},
+	"setting_diy_field_form": {CapabilityAdmin},
+	"setting_index":        {CapabilityAdmin},
+	"setting_index_form":   {CapabilityAdmin},
+	"setting_content":      {CapabilityAdmin},
+	"setting_content_form": {CapabilityAdmin},
+	"setting_safe":         {CapabilityAdmin},
+	"setting_safe_form":    {CapabilityAdmin},
+	"setting_migrate_db":   {CapabilityAdmin},
+	"plugin_robots_get":    {CapabilityAdmin},
+	"plugin_robots_set":    {CapabilityAdmin},
+	"rewrite_get":          {CapabilityAdmin},
+	"rewrite_form":         {CapabilityAdmin},
+	"plugin_htmlcache_build":  {CapabilityAdmin},
+	"plugin_fulltext_rebuild": {CapabilityAdmin},
+	"plugin_backup_dump":      {CapabilityAdmin},
+	"user_list":   {CapabilityAdmin},
+	"user_get":    {CapabilityAdmin},
+	"user_create": {CapabilityAdmin},
+	"user_update": {CapabilityAdmin},
+	"user_delete": {CapabilityAdmin},
+	"order_list":  {CapabilityAdmin},
+
+	// === agent ===
+	"agent_create": {CapabilityAgent},
+	"agent_list":   {CapabilityAgent},
+	"agent_delete": {CapabilityAgent},
+	"agent_toggle": {CapabilityAgent},
+	"agent_run":    {CapabilityAgent},
+	"agent_chat":   {CapabilityAgent},
+
+	// === universal（信息查询、系统状态） ===
+	"website_info": {CapabilityUniversal},
+	"version":      {CapabilityUniversal},
+	"anqi_info":    {CapabilityUniversal, CapabilityAdmin},
+
+	// === skill 工具 ===
+	"skill_list":   {CapabilityAdmin},
+	"skill_get":    {CapabilityAdmin},
+	"skill_reload": {CapabilityAdmin},
+	"skill_save":   {CapabilityAdmin},
+
+	// === 内置工具（文件、shell、web 等）=== universal
+	"read_file":       {CapabilityUniversal},
+	"write_file":      {CapabilityUniversal},
+	"edit_file":       {CapabilityUniversal},
+	"search_replace":  {CapabilityUniversal},
+	"bash":            {CapabilityUniversal},
+	"grep":            {CapabilityUniversal},
+	"glob":            {CapabilityUniversal},
+	"list_directory":  {CapabilityUniversal},
+	"web_fetch":       {CapabilityUniversal},
+	"web_search":      {CapabilityUniversal},
+}
+
+// getToolPackages returns the capability packages a tool belongs to.
+// Falls back to [CapabilityAdmin] for unknown tools.
+func getToolPackages(name string) []string {
+	if pkgs, ok := toolCapabilityMapping[name]; ok {
+		return pkgs
+	}
+	return []string{CapabilityAdmin}
+}
+
+// GetEinoToolsSummary returns a summary of all tools with minimal information
+// (empty parameters) for the first-round capability declaration.
+// Each tool's description includes its capability package tags like [content].
+func (svc *AiChatService) GetEinoToolsSummary() []*schema.ToolInfo {
+	summary := make([]*schema.ToolInfo, 0, len(svc.Tools))
+	for _, ti := range svc.Tools {
+		if ti.Name == "declare_capability_packages" {
+			continue // 不包含自身
+		}
+		// Keep name & desc for the model to know the tool exists; clear params
+		s := &schema.ToolInfo{
+			Name: ti.Name,
+			Desc: ti.Desc,
+		}
+		// Add package tags to description
+		pkgs := getToolPackages(ti.Name)
+		if len(pkgs) > 0 {
+			s.Desc = ti.Desc + " [" + strings.Join(pkgs, ",") + "]"
+		}
+		summary = append(summary, s)
+	}
+	return summary
+}
+
+// getToolsByCapabilityPackages returns full tool definitions filtered by capability packages.
+// Always includes tools that belong to CapabilityUniversal.
+// This is used after the model declares its needed packages.
+func (svc *AiChatService) GetToolsByCapabilityPackages(packages []string) ([]*schema.ToolInfo, map[string]toolHandler) {
+	// Build a set of requested packages (always include universal)
+	pkgSet := map[string]bool{CapabilityUniversal: true}
+	for _, p := range packages {
+		pkgSet[p] = true
+	}
+
+	allTools, allHandlers := svc.getEinoTools()
+
+	filteredTools := make([]*schema.ToolInfo, 0)
+	filteredHandlers := make(map[string]toolHandler)
+
+	for _, ti := range allTools {
+		pkgs := getToolPackages(ti.Name)
+		// Check if any of the tool's packages are in the requested set
+		for _, p := range pkgs {
+			if pkgSet[p] {
+				filteredTools = append(filteredTools, ti)
+				if fn, ok := allHandlers[ti.Name]; ok {
+					filteredHandlers[ti.Name] = fn
+				}
+				break
+			}
+		}
+	}
+
+	return filteredTools, filteredHandlers
+}
+
+// BuildDeclareTool creates the special declaration tool that the model must
+// call on the first turn to declare its required capability packages.
+func BuildDeclareTool() *schema.ToolInfo {
+	return &schema.ToolInfo{
+		Name: "declare_capability_packages",
+		Desc: "声明本次对话需要的功能包。必须在第一轮对话中首先调用此工具，列出你需要的所有能力包。可用包：content（内容管理）、structure（结构管理）、design（模板设计）、seo（SEO优化）、admin（系统管理）、agent（智能体管理）。根据用户的请求选择合适的包组合。",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"packages": {
+				Type: schema.Array,
+				Desc: "需要的能力包名称列表，例如 [\"content\", \"universal\"]。可用值：content, structure, design, seo, admin, agent, universal",
+				ElemInfo: &schema.ParameterInfo{
+					Type: schema.String,
+				},
+			},
+		}),
+	}
 }

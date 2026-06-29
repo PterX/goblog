@@ -57,18 +57,3 @@ initial();
 $(document).on('click', '.tool-item', function() {
   $(this).addClass('active').siblings().removeClass('active');
 })
-// pjax
-$(document).pjax('a', '#pjax-container');
-$(document).on('pjax:beforeSend', function(xhr) {
-  if ($(xhr.relatedTarget).data("pjax") === false) {
-    window.location.href = $(xhr.relatedTarget).prop('href');
-    return false
-  }
-})
-$(document).on('pjax:send', function() {
-  NProgress.start();
-})
-$(document).on('pjax:complete', function() {
-  NProgress.done();
-  initial();
-})

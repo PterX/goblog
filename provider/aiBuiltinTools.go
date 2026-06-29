@@ -6,9 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go/ast"
 	"go/format"
-	"go/parser"
 	"go/token"
 	"io"
 	"net/http"
@@ -98,43 +96,23 @@ type importArgs struct {
 	File string `json:"file"`
 }
 
-// ---- Project root & cache path (safe boundary) ----
+// ---- Project root (safe boundary) ----
 // All file operations are restricted to projectRoot.
-// Temporary/generated files (scripts, etc.) must be written to cachePath.
+// projectRoot 由 AiChatService 传入（各站点有自己的 RootPath）
 
-var projectRoot string
-var cachePath string
-
-func init() {
-	if config.ExecPath != "" {
-		projectRoot = strings.TrimSuffix(config.ExecPath, "/")
-		cachePath = config.ExecPath + "cache"
-	} else {
-		wd, err := os.Getwd()
-		if err == nil {
-			projectRoot = wd
-			cachePath = filepath.Join(wd, "cache")
-		}
-	}
-}
-
-func safePath(path string) (string, error) {
-	if projectRoot == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("无法获取工作目录: %w", err)
-		}
-		projectRoot = wd
+func (svc *AiChatService) safePath(path string) (string, error) {
+	if svc.projectRoot == "" {
+		return "", fmt.Errorf("projectRoot 未配置")
 	}
 	p := path
 	if !filepath.IsAbs(p) {
-		p = filepath.Join(projectRoot, p)
+		p = filepath.Join(svc.projectRoot, p)
 	}
 	p, err := filepath.Abs(p)
 	if err != nil {
 		return "", fmt.Errorf("无法解析路径: %w", err)
 	}
-	if !strings.HasPrefix(p, projectRoot) {
+	if !strings.HasPrefix(p, svc.projectRoot) {
 		return "", fmt.Errorf("路径超出项目目录范围: %s", p)
 	}
 	return p, nil
@@ -180,7 +158,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			return "错误：禁止访问系统敏感路径", nil
 		}
 
-		fullPath, err := safePathResolve(path)
+		fullPath, err := safePathResolve(path, svc.projectRoot)
 		if err != nil {
 			return friendlyPathError(err), nil
 		}
@@ -188,12 +166,12 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		if err != nil {
 			if os.IsNotExist(err) {
 				// Show file-not-found suggestions
-				similar := findSimilarFiles(path, 20)
+				similar := findSimilarFiles(path, 20, svc.projectRoot)
 				msg := fmt.Sprintf("错误：文件不存在: %s", path)
 				if len(similar) > 0 {
 					msg += "\n\n您是不是要查找：\n"
 					for _, s := range similar {
-						rel, _ := filepath.Rel(projectRoot, s)
+						rel, _ := filepath.Rel(svc.projectRoot, s)
 						msg += fmt.Sprintf("  %s\n", rel)
 					}
 				}
@@ -223,7 +201,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			return "", fmt.Errorf("读取文件失败: %w", err)
 		}
 
-		relPath, _ := filepath.Rel(projectRoot, fullPath)
+		relPath, _ := filepath.Rel(svc.projectRoot, fullPath)
 		lines := strings.Split(string(data), "\n")
 		totalLines := len(lines)
 
@@ -281,7 +259,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 
 	add(&schema.ToolInfo{
 		Name: "write_file",
-		Desc: "写入或创建文件。如果文件已存在则覆盖。会自动创建父目录。注意：只能操作项目目录内的文件。临时脚本（py/sh等）请写入 cache/ 目录（projectRoot + \"cache/\"）。",
+		Desc: "写入或创建文件。如果文件已存在则覆盖。会自动创建父目录。注意：只能操作项目目录内的文件。临时脚本（py/sh等）请写入 cache/ 目录（" + svc.projectRoot + "cache/" + "）。",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"file_path": {Type: schema.String, Desc: "文件路径，相对项目根目录或绝对路径", Required: true},
 			"content":   {Type: schema.String, Desc: "文件内容", Required: true},
@@ -300,7 +278,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		if isSensitiveInputPath(args.Path) {
 			return "错误：禁止写入系统敏感路径", nil
 		}
-		fullPath, err := safePathResolve(args.Path)
+		fullPath, err := safePathResolve(args.Path, svc.projectRoot)
 		if err != nil {
 			return friendlyPathError(err), nil
 		}
@@ -308,7 +286,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		if info, err := os.Stat(fullPath); err == nil {
 			oldSize := info.Size()
 			newSize := len(args.Content)
-			relPath, _ := filepath.Rel(projectRoot, fullPath)
+			relPath, _ := filepath.Rel(svc.projectRoot, fullPath)
 			if newSize < int(oldSize/2) && oldSize > 100 {
 				return fmt.Sprintf("⚠ 警告：文件 %s 将缩小超过 50%%（从 %d 字节到 %d 字节），是否确认？请检查内容是否完整。", relPath, oldSize, newSize), nil
 			}
@@ -323,7 +301,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		}
 		// Invalidate cache
 		invalidateReadCache(fullPath)
-		relPath, _ := filepath.Rel(projectRoot, fullPath)
+		relPath, _ := filepath.Rel(svc.projectRoot, fullPath)
 		return fmt.Sprintf("文件写入成功: %s (%d 字节)", relPath, len(args.Content)), nil
 	})
 
@@ -366,7 +344,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			return "错误：文件路径和搜索文本不能为空", nil
 		}
 
-		fullPath, err := safePath(path)
+		fullPath, err := svc.safePath(path)
 		if err != nil {
 			return "错误：" + err.Error(), nil
 		}
@@ -390,7 +368,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 				return "", fmt.Errorf("写入文件失败: %w", err)
 			}
 			invalidateReadCache(fullPath)
-			relPath, _ := filepath.Rel(projectRoot, fullPath)
+			relPath, _ := filepath.Rel(svc.projectRoot, fullPath)
 			return fmt.Sprintf("文件 %s 已更新（行 %d-%d 已替换）", relPath, args.StartLine, endLine), nil
 		}
 
@@ -410,7 +388,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		}
 		invalidateReadCache(fullPath)
 		count := strings.Count(string(data), oldStr)
-		relPath, _ := filepath.Rel(projectRoot, fullPath)
+		relPath, _ := filepath.Rel(svc.projectRoot, fullPath)
 		msg := fmt.Sprintf("文件 %s 已更新，共替换 1 处", relPath)
 		if count > 1 {
 			msg += fmt.Sprintf("\n(注：文件中包含 %d 处匹配，仅替换第 1 处。如需全部替换请使用 search_replace 工具)", count)
@@ -440,13 +418,13 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		}
 
 		// Find matching files
-		_, err := filepath.Glob(filepath.Join(projectRoot, args.Glob))
+		_, err := filepath.Glob(filepath.Join(svc.projectRoot, args.Glob))
 		if err != nil {
 			return "", fmt.Errorf("文件匹配失败: %w", err)
 		}
 		// filepath.Glob doesn't support ** — do manual walk
 		var allFiles []string
-		err = filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
+		err = filepath.Walk(svc.projectRoot, func(path string, fi os.FileInfo, err error) error {
 			if err != nil {
 				return nil // skip inaccessible
 			}
@@ -458,7 +436,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 				}
 				return nil
 			}
-			rel, _ := filepath.Rel(projectRoot, path)
+			rel, _ := filepath.Rel(svc.projectRoot, path)
 			matched, err := filepath.Match(args.Glob, rel)
 			if err != nil {
 				return nil
@@ -485,7 +463,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		if args.Glob == "**/*" {
 			// Already collected everything — need to redo properly
 			allFiles = nil
-			filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
+			filepath.Walk(svc.projectRoot, func(path string, fi os.FileInfo, err error) error {
 				if err != nil || fi.IsDir() {
 					if fi != nil && fi.IsDir() {
 						base := fi.Name()
@@ -551,7 +529,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 				if err := os.WriteFile(fp, newData, 0644); err != nil {
 					continue
 				}
-				relPath, _ := filepath.Rel(projectRoot, fp)
+				relPath, _ := filepath.Rel(svc.projectRoot, fp)
 				matchedFiles = append(matchedFiles, fmt.Sprintf("  - %s (%d 处)", relPath, count))
 				totalReplacements += count
 			}
@@ -598,7 +576,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		} else {
 			cmd = exec.Command("sh", "-c", args.Command)
 		}
-		cmd.Dir = projectRoot
+		cmd.Dir = svc.projectRoot
 
 		timeout := time.Duration(args.Timeout) * time.Second
 		ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -678,7 +656,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		var matches []match
 		maxResults := 100
 
-		filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
+		filepath.Walk(svc.projectRoot, func(path string, fi os.FileInfo, err error) error {
 			if err != nil || fi.IsDir() {
 				if fi != nil && fi.IsDir() {
 					base := fi.Name()
@@ -690,7 +668,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			}
 			// Check glob
 			if args.Glob != "" {
-				rel, _ := filepath.Rel(projectRoot, path)
+				rel, _ := filepath.Rel(svc.projectRoot, path)
 				matched, _ := filepath.Match(args.Glob, fi.Name())
 				matchedRel, _ := filepath.Match(args.Glob, rel)
 				if !matched && !matchedRel {
@@ -717,7 +695,7 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 				return nil // skip large files
 			}
 
-			relPath, _ := filepath.Rel(projectRoot, path)
+			relPath, _ := filepath.Rel(svc.projectRoot, path)
 			for i, line := range lines {
 				if re.MatchString(line) {
 					if len(matches) >= maxResults {
@@ -787,11 +765,11 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		var results []string
 		maxResults := 200
 
-		_ = filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
+		_ = filepath.Walk(svc.projectRoot, func(path string, fi os.FileInfo, err error) error {
 			if err != nil {
 				return nil
 			}
-			rel, _ := filepath.Rel(projectRoot, path)
+			rel, _ := filepath.Rel(svc.projectRoot, path)
 			// Skip hidden dirs
 			if fi.IsDir() {
 				base := fi.Name()
@@ -855,10 +833,10 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 			return "", fmt.Errorf("无法解析参数: %w", err)
 		}
-		basePath := projectRoot
+		basePath := svc.projectRoot
 		if args.Path != "" {
 			var err error
-			basePath, err = safePath(args.Path)
+			basePath, err = svc.safePath(args.Path)
 			if err != nil {
 				return "错误：" + err.Error(), nil
 			}
@@ -883,9 +861,9 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 		}
 
 		var b strings.Builder
-		rel, _ := filepath.Rel(projectRoot, basePath)
+		rel, _ := filepath.Rel(svc.projectRoot, basePath)
 		if rel == "." {
-			rel = projectRoot
+			rel = svc.projectRoot
 		}
 		b.WriteString(fmt.Sprintf("📁 %s/\n", rel))
 
@@ -1038,713 +1016,6 @@ func (svc *AiChatService) getBuiltinEinoTools() ([]*schema.ToolInfo, map[string]
 			return searchDuckDuckGo(ctx, args.Query)
 		}
 		return searchBing(ctx, args.Query)
-	})
-
-	// ================================================================
-	//  Code Intelligence tools
-	// ================================================================
-
-	add(&schema.ToolInfo{
-		Name: "list_symbols",
-		Desc: "列出 Go 文件或包中的导出符号（函数、类型、变量、常量）。可以指定文件路径或包名。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"file":    {Type: schema.String, Desc: "Go 文件路径，如 provider/aiTools.go"},
-			"package": {Type: schema.String, Desc: "包路径，如 kandaoni.com/anqicms/provider，如果不指定则解析 file 所在的包"},
-		}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		var args symbolArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("无法解析参数: %w", err)
-		}
-		if args.File == "" && args.Package == "" {
-			return "错误：请指定 file 或 package 参数", nil
-		}
-
-		var files []string
-		if args.File != "" {
-			fullPath, err := safePath(args.File)
-			if err != nil {
-				return "错误：" + err.Error(), nil
-			}
-			if !strings.HasSuffix(fullPath, ".go") {
-				return "错误：文件必须为 .go 文件", nil
-			}
-			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-				return fmt.Sprintf("错误：文件不存在: %s", args.File), nil
-			}
-			files = append(files, fullPath)
-		} else {
-			// Find all .go files in the package directory
-			pkgPath := filepath.Join(projectRoot, strings.ReplaceAll(args.Package, "kandaoni.com/anqicms/", ""))
-			if _, err := os.Stat(pkgPath); os.IsNotExist(err) {
-				// Try as-is
-				pkgPath = filepath.Join(projectRoot, args.Package)
-				if _, err := os.Stat(pkgPath); os.IsNotExist(err) {
-					return fmt.Sprintf("错误：包路径不存在: %s", args.Package), nil
-				}
-			}
-			entries, err := os.ReadDir(pkgPath)
-			if err != nil {
-				return "", fmt.Errorf("读取目录失败: %w", err)
-			}
-			for _, e := range entries {
-				if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") && !strings.HasSuffix(e.Name(), "_test.go") {
-					files = append(files, filepath.Join(pkgPath, e.Name()))
-				}
-			}
-		}
-
-		if len(files) == 0 {
-			return "未找到 Go 文件", nil
-		}
-
-		type symbolInfo struct {
-			Kind string
-			Name string
-			File string
-			Line int
-			Doc  string
-		}
-		var symbols []symbolInfo
-
-		fset := token.NewFileSet()
-		for _, file := range files {
-			f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
-			if err != nil {
-				continue
-			}
-			relPath, _ := filepath.Rel(projectRoot, file)
-
-			// Collect comments
-			comments := make(map[token.Pos]string)
-			for _, cg := range f.Comments {
-				for _, c := range cg.List {
-					comments[c.Slash] = strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
-				}
-			}
-
-			ast.Inspect(f, func(n ast.Node) bool {
-				switch decl := n.(type) {
-				case *ast.GenDecl:
-					if decl.Tok == token.TYPE {
-						for _, spec := range decl.Specs {
-							if ts, ok := spec.(*ast.TypeSpec); ok && ts.Name.IsExported() {
-								doc := ""
-								if decl.Doc != nil {
-									doc = decl.Doc.Text()
-								}
-								symbols = append(symbols, symbolInfo{
-									Kind: "type",
-									Name: ts.Name.Name,
-									File: relPath,
-									Line: fset.Position(ts.Pos()).Line,
-									Doc:  strings.TrimSpace(doc),
-								})
-							}
-						}
-					}
-					if decl.Tok == token.VAR {
-						for _, spec := range decl.Specs {
-							if vs, ok := spec.(*ast.ValueSpec); ok {
-								for _, name := range vs.Names {
-									if name.IsExported() {
-										doc := ""
-										if decl.Doc != nil {
-											doc = decl.Doc.Text()
-										}
-										symbols = append(symbols, symbolInfo{
-											Kind: "var",
-											Name: name.Name,
-											File: relPath,
-											Line: fset.Position(name.Pos()).Line,
-											Doc:  strings.TrimSpace(doc),
-										})
-									}
-								}
-							}
-						}
-					}
-					if decl.Tok == token.CONST {
-						for _, spec := range decl.Specs {
-							if vs, ok := spec.(*ast.ValueSpec); ok {
-								for _, name := range vs.Names {
-									if name.IsExported() {
-										doc := ""
-										if decl.Doc != nil {
-											doc = decl.Doc.Text()
-										}
-										symbols = append(symbols, symbolInfo{
-											Kind: "const",
-											Name: name.Name,
-											File: relPath,
-											Line: fset.Position(name.Pos()).Line,
-											Doc:  strings.TrimSpace(doc),
-										})
-									}
-								}
-							}
-						}
-					}
-				case *ast.FuncDecl:
-					if decl.Name.IsExported() {
-						doc := ""
-						if decl.Doc != nil {
-							doc = decl.Doc.Text()
-						}
-						recv := ""
-						if decl.Recv != nil {
-							for _, field := range decl.Recv.List {
-								switch t := field.Type.(type) {
-								case *ast.StarExpr:
-									if ident, ok := t.X.(*ast.Ident); ok {
-										recv = ident.Name
-									}
-								case *ast.Ident:
-									recv = t.Name
-								}
-							}
-							recv = "(" + recv + ")"
-						}
-						name := recv + decl.Name.Name
-						symbols = append(symbols, symbolInfo{
-							Kind: "func",
-							Name: name,
-							File: relPath,
-							Line: fset.Position(decl.Pos()).Line,
-							Doc:  strings.TrimSpace(doc),
-						})
-					}
-				}
-				return true
-			})
-		}
-
-		if len(symbols) == 0 {
-			return "未找到导出的符号", nil
-		}
-
-		// Group by kind
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("共 %d 个导出符号：\n\n", len(symbols)))
-
-		groups := make(map[string][]symbolInfo)
-		for _, s := range symbols {
-			groups[s.Kind] = append(groups[s.Kind], s)
-		}
-		for _, kind := range []string{"type", "func", "var", "const"} {
-			if syms, ok := groups[kind]; ok {
-				b.WriteString(fmt.Sprintf("── %s (%d) ──\n", kind, len(syms)))
-				for _, s := range syms {
-					b.WriteString(fmt.Sprintf("  %s (%s:%d)", s.Name, s.File, s.Line))
-					if s.Doc != "" {
-						doc := strings.Split(s.Doc, "\n")[0]
-						if len(doc) > 60 {
-							doc = doc[:60] + "..."
-						}
-						b.WriteString(fmt.Sprintf("  // %s", doc))
-					}
-					b.WriteString("\n")
-				}
-				b.WriteString("\n")
-			}
-		}
-		return b.String(), nil
-	})
-
-	add(&schema.ToolInfo{
-		Name: "read_symbol",
-		Desc: "读取 Go 代码中某个符号（函数、类型等）的定义。可以指定符号名称和文件路径，如果不指定文件则全局搜索。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"symbol": {Type: schema.String, Desc: "要查找的符号名称（函数名、类型名等）", Required: true},
-			"file":   {Type: schema.String, Desc: "Go 文件路径，如果不指定则在所有文件中搜索"},
-		}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		var args symbolArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("无法解析参数: %w", err)
-		}
-		if args.Symbol == "" {
-			return "错误：符号名称不能为空", nil
-		}
-
-		var searchFiles []string
-		if args.File != "" {
-			fullPath, err := safePath(args.File)
-			if err != nil {
-				return "错误：" + err.Error(), nil
-			}
-			searchFiles = append(searchFiles, fullPath)
-		} else {
-			// Walk the project and find all .go files
-			filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
-				if err != nil || fi.IsDir() {
-					if fi != nil && fi.IsDir() {
-						base := fi.Name()
-						if strings.HasPrefix(base, ".") || base == "vendor" || base == "node_modules" {
-							return filepath.SkipDir
-						}
-					}
-					return nil
-				}
-				if strings.HasSuffix(path, ".go") {
-					// Skip generated files
-					if strings.HasSuffix(path, "_test.go") {
-						return nil
-					}
-					searchFiles = append(searchFiles, path)
-				}
-				return nil
-			})
-			if len(searchFiles) > 200 {
-				return fmt.Sprintf("错误：项目中有 %d 个 Go 文件，请指定 file 参数缩小搜索范围", len(searchFiles)), nil
-			}
-		}
-
-		fset := token.NewFileSet()
-		for _, file := range searchFiles {
-			f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
-			if err != nil {
-				continue
-			}
-
-			var found bool
-			var resultBuf bytes.Buffer
-			ast.Inspect(f, func(n ast.Node) bool {
-				if found {
-					return false
-				}
-				switch decl := n.(type) {
-				case *ast.FuncDecl:
-					if decl.Name.Name == args.Symbol || strings.HasSuffix(decl.Name.Name, "."+args.Symbol) {
-						if decl.Doc != nil {
-							resultBuf.WriteString(decl.Doc.Text() + "\n")
-						}
-						format.Node(&resultBuf, fset, decl)
-						relPath, _ := filepath.Rel(projectRoot, file)
-						resultBuf.WriteString(fmt.Sprintf("\n// 文件: %s\n", relPath))
-						found = true
-						return false
-					}
-				case *ast.GenDecl:
-					for _, spec := range decl.Specs {
-						switch s := spec.(type) {
-						case *ast.TypeSpec:
-							if s.Name.Name == args.Symbol {
-								if decl.Doc != nil {
-									resultBuf.WriteString(decl.Doc.Text() + "\n")
-								}
-								format.Node(&resultBuf, fset, decl)
-								relPath, _ := filepath.Rel(projectRoot, file)
-								resultBuf.WriteString(fmt.Sprintf("\n// 文件: %s\n", relPath))
-								found = true
-								return false
-							}
-						case *ast.ValueSpec:
-							for _, name := range s.Names {
-								if name.Name == args.Symbol {
-									if decl.Doc != nil {
-										resultBuf.WriteString(decl.Doc.Text() + "\n")
-									}
-									format.Node(&resultBuf, fset, decl)
-									relPath, _ := filepath.Rel(projectRoot, file)
-									resultBuf.WriteString(fmt.Sprintf("\n// 文件: %s\n", relPath))
-									found = true
-									return false
-								}
-							}
-						}
-					}
-				}
-				return true
-			})
-			if found {
-				return resultBuf.String(), nil
-			}
-		}
-
-		return fmt.Sprintf("未找到符号 \"%s\" 的定义", args.Symbol), nil
-	})
-
-	add(&schema.ToolInfo{
-		Name: "find_references",
-		Desc: "查找某个符号在项目代码中的引用位置。支持指定符号名称。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"symbol": {Type: schema.String, Desc: "要查找的符号名称", Required: true},
-			"file":   {Type: schema.String, Desc: "限制在特定文件中搜索，可选"},
-		}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		var args symbolArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("无法解析参数: %w", err)
-		}
-		if args.Symbol == "" {
-			return "错误：符号名称不能为空", nil
-		}
-
-		// Use grep-like approach: find lines where symbol is referenced,
-		// excluding its own definition.
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(args.Symbol) + `\b`)
-
-		type ref struct {
-			File    string
-			Line    int
-			Content string
-		}
-		var refs []ref
-		maxResults := 50
-
-		filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
-			if err != nil || fi.IsDir() {
-				if fi != nil && fi.IsDir() {
-					base := fi.Name()
-					if strings.HasPrefix(base, ".") || base == "vendor" || base == "node_modules" {
-						return filepath.SkipDir
-					}
-				}
-				return nil
-			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			if args.File != "" {
-				if !strings.Contains(path, args.File) {
-					return nil
-				}
-			}
-			if fi.Size() > 1024*1024 {
-				return nil
-			}
-
-			f, err := os.Open(path)
-			if err != nil {
-				return nil
-			}
-			defer f.Close()
-
-			relPath, _ := filepath.Rel(projectRoot, path)
-			scanner := bufio.NewScanner(f)
-			lineNum := 0
-			for scanner.Scan() {
-				lineNum++
-				line := scanner.Text()
-				if re.MatchString(line) {
-					// Skip if it's the definition (func ...)
-					trimmed := strings.TrimSpace(line)
-					if strings.HasPrefix(trimmed, "func ") &&
-						strings.Contains(trimmed, args.Symbol+"(") ||
-						strings.HasPrefix(trimmed, "type ") &&
-							strings.Contains(trimmed, args.Symbol+" ") {
-						continue
-					}
-					refs = append(refs, ref{
-						File:    relPath,
-						Line:    lineNum,
-						Content: strings.TrimSpace(line),
-					})
-					if len(refs) >= maxResults {
-						return fmt.Errorf("max results")
-					}
-				}
-			}
-			return nil
-		})
-
-		if len(refs) == 0 {
-			return fmt.Sprintf("未找到 \"%s\" 的引用", args.Symbol), nil
-		}
-
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("符号 \"%s\" 的引用（共 %d 处）：\n\n", args.Symbol, len(refs)))
-		for _, r := range refs {
-			b.WriteString(fmt.Sprintf("%s:%d  %s\n", r.File, r.Line, r.Content))
-		}
-		if len(refs) >= maxResults {
-			b.WriteString("\n... (结果过多，仅显示前 50 条)")
-		}
-		return b.String(), nil
-	})
-
-	add(&schema.ToolInfo{
-		Name: "file_deps",
-		Desc: "查看 Go 文件的导入依赖关系。列出文件导入的外部包和内部包。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"file": {Type: schema.String, Desc: "Go 文件路径", Required: true},
-		}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		var args importArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("无法解析参数: %w", err)
-		}
-		if args.File == "" {
-			return "错误：文件路径不能为空", nil
-		}
-		fullPath, err := safePath(args.File)
-		if err != nil {
-			return "错误：" + err.Error(), nil
-		}
-		if !strings.HasSuffix(fullPath, ".go") {
-			return "错误：文件必须为 .go 文件", nil
-		}
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-			return fmt.Sprintf("错误：文件不存在: %s", args.File), nil
-		}
-
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, fullPath, nil, parser.ImportsOnly)
-		if err != nil {
-			return "", fmt.Errorf("解析文件失败: %w", err)
-		}
-
-		relPath, _ := filepath.Rel(projectRoot, fullPath)
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("文件: %s\n包: %s\n\n", relPath, f.Name.Name))
-
-		var stdLibs, internalPkgs, externalPkgs []string
-		for _, imp := range f.Imports {
-			path := strings.Trim(imp.Path.Value, "\"")
-			if imp.Name != nil {
-				path = imp.Name.Name + " " + path
-			}
-			if strings.HasPrefix(path, "kandaoni.com/anqicms") || strings.HasPrefix(path, "kandaoni.com/anqicms/") {
-				internalPkgs = append(internalPkgs, path)
-			} else if strings.Contains(path, ".") {
-				externalPkgs = append(externalPkgs, path)
-			} else {
-				stdLibs = append(stdLibs, path)
-			}
-		}
-
-		if len(stdLibs) > 0 {
-			b.WriteString(fmt.Sprintf("标准库 (%d)：\n", len(stdLibs)))
-			for _, p := range stdLibs {
-				b.WriteString(fmt.Sprintf("  - %s\n", p))
-			}
-			b.WriteString("\n")
-		}
-		if len(internalPkgs) > 0 {
-			b.WriteString(fmt.Sprintf("内部包 (%d)：\n", len(internalPkgs)))
-			for _, p := range internalPkgs {
-				b.WriteString(fmt.Sprintf("  - %s\n", p))
-			}
-			b.WriteString("\n")
-		}
-		if len(externalPkgs) > 0 {
-			b.WriteString(fmt.Sprintf("外部依赖 (%d)：\n", len(externalPkgs)))
-			for _, p := range externalPkgs {
-				b.WriteString(fmt.Sprintf("  - %s\n", p))
-			}
-			b.WriteString("\n")
-		}
-		return b.String(), nil
-	})
-
-	add(&schema.ToolInfo{
-		Name: "call_graph",
-		Desc: "分析 Go 函数的调用关系。显示一个函数调用了哪些函数（被调用者），以及哪些函数调用了它（调用者）。基于代码文本分析。",
-		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
-			"symbol": {Type: schema.String, Desc: "函数名", Required: true},
-			"file":   {Type: schema.String, Desc: "Go 文件路径，如果不指定则在所有文件中搜索"},
-		}),
-	}, func(ctx context.Context, argsJSON string) (string, error) {
-		var args symbolArgs
-		if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-			return "", fmt.Errorf("无法解析参数: %w", err)
-		}
-		if args.Symbol == "" {
-			return "错误：符号名称不能为空", nil
-		}
-
-		// Find the function definition
-		fset := token.NewFileSet()
-		type funcInfo struct {
-			File    string
-			Line    int
-			Calls   []string
-			Content string
-		}
-		var targetFunc *funcInfo
-
-		filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
-			if err != nil || fi.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				if fi != nil && fi.IsDir() {
-					base := fi.Name()
-					if strings.HasPrefix(base, ".") || base == "vendor" || base == "node_modules" {
-						return filepath.SkipDir
-					}
-				}
-				return nil
-			}
-			if args.File != "" && !strings.Contains(path, args.File) {
-				return nil
-			}
-			if targetFunc != nil {
-				return fmt.Errorf("done")
-			}
-
-			f, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				return nil
-			}
-
-			relPath, _ := filepath.Rel(projectRoot, path)
-			for _, decl := range f.Decls {
-				if fd, ok := decl.(*ast.FuncDecl); ok {
-					if fd.Name.Name == args.Symbol {
-						info := &funcInfo{
-							File: relPath,
-							Line: fset.Position(fd.Pos()).Line,
-						}
-
-						// Extract function body text
-						var buf bytes.Buffer
-						if fd.Doc != nil {
-							buf.WriteString(fd.Doc.Text())
-						}
-						buf.WriteString(renderNode(fset, fd))
-
-						info.Content = buf.String()
-						targetFunc = info
-						return fmt.Errorf("done")
-					}
-				}
-			}
-			return nil
-		})
-
-		if targetFunc == nil {
-			return fmt.Sprintf("未找到函数 \"%s\" 的定义", args.Symbol), nil
-		}
-
-		// Extract function calls from the body using AST
-		fset2 := token.NewFileSet()
-		funcFile, _ := parser.ParseFile(fset2, filepath.Join(projectRoot, targetFunc.File), nil, 0)
-
-		var callees []string
-		seen := make(map[string]bool)
-		for _, decl := range funcFile.Decls {
-			if fd, ok := decl.(*ast.FuncDecl); ok && fd.Name.Name == args.Symbol {
-				if fd.Body != nil {
-					ast.Inspect(fd.Body, func(n ast.Node) bool {
-						if ce, ok := n.(*ast.CallExpr); ok {
-							switch fun := ce.Fun.(type) {
-							case *ast.Ident:
-								name := fun.Name
-								// Skip builtins and control flow
-								if !seen[name] && name != "len" && name != "cap" &&
-									name != "append" && name != "copy" &&
-									name != "make" && name != "new" &&
-									name != "delete" && name != "close" &&
-									name != "panic" && name != "recover" &&
-									name != "print" && name != "println" &&
-									name != "error" && name != "string" {
-									// Check if it's a function call (not a type conversion)
-									if !ast.IsExported(name) || len(fun.Name) > 1 {
-										callees = append(callees, name)
-										seen[name] = true
-									}
-								}
-							case *ast.SelectorExpr:
-								if ident, ok := fun.X.(*ast.Ident); ok {
-									callees = append(callees, ident.Name+"."+fun.Sel.Name)
-									seen[ident.Name+"."+fun.Sel.Name] = true
-								}
-							}
-						}
-						return true
-					})
-				}
-			}
-		}
-
-		// Find callers (functions that call this symbol)
-		type callerInfo struct {
-			File string
-			Line int
-			Name string
-		}
-		var callers []callerInfo
-		_ = filepath.Walk(projectRoot, func(path string, fi os.FileInfo, err error) error {
-			if err != nil || fi.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				if fi != nil && fi.IsDir() {
-					base := fi.Name()
-					if strings.HasPrefix(base, ".") || base == "vendor" || base == "node_modules" {
-						return filepath.SkipDir
-					}
-				}
-				return nil
-			}
-			if len(callers) >= 30 {
-				return fmt.Errorf("max")
-			}
-
-			f, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				return nil
-			}
-
-			relPath, _ := filepath.Rel(projectRoot, path)
-			for _, decl := range f.Decls {
-				if fd, ok := decl.(*ast.FuncDecl); ok && fd.Body != nil {
-					if fd.Name.Name == args.Symbol {
-						continue // skip the definition itself
-					}
-					found := false
-					ast.Inspect(fd.Body, func(n ast.Node) bool {
-						if ce, ok := n.(*ast.CallExpr); ok {
-							switch fun := ce.Fun.(type) {
-							case *ast.Ident:
-								if fun.Name == args.Symbol {
-									callers = append(callers, callerInfo{
-										File: relPath,
-										Line: fset.Position(ce.Pos()).Line,
-										Name: fd.Name.Name,
-									})
-									found = true
-									return false
-								}
-							case *ast.SelectorExpr:
-								if fun.Sel.Name == args.Symbol {
-									callers = append(callers, callerInfo{
-										File: relPath,
-										Line: fset.Position(ce.Pos()).Line,
-										Name: fmt.Sprintf("%s.%s", fd.Name.Name, args.Symbol),
-									})
-									found = true
-									return false
-								}
-							}
-						}
-						return !found
-					})
-				}
-			}
-			return nil
-		})
-
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("函数: %s\n文件: %s:%d\n\n", args.Symbol, targetFunc.File, targetFunc.Line))
-
-		if len(callees) > 0 {
-			b.WriteString(fmt.Sprintf("被调用者 (调用了 %d 个函数/方法)：\n", len(callees)))
-			for _, c := range callees {
-				b.WriteString(fmt.Sprintf("  → %s\n", c))
-			}
-		} else {
-			b.WriteString("被调用者：无内部函数调用\n")
-		}
-
-		b.WriteString("\n")
-
-		if len(callers) > 0 {
-			b.WriteString(fmt.Sprintf("调用者 (%d 处)：\n", len(callers)))
-			for _, c := range callers {
-				b.WriteString(fmt.Sprintf("  ← %s (%s:%d)\n", c.Name, c.File, c.Line))
-			}
-		} else {
-			b.WriteString("调用者：未找到\n")
-		}
-
-		return b.String(), nil
 	})
 
 	return tools, handlers

@@ -1,25 +1,41 @@
 package manageController
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/kataras/iris/v12"
 
+	"kandaoni.com/anqicms/config"
+	"kandaoni.com/anqicms/model"
 	"kandaoni.com/anqicms/pkg/ai/eino"
 	"kandaoni.com/anqicms/provider"
 )
 
 // ChatRequest represents an AI chat request
 type ChatRequest struct {
-	SessionID string `json:"session_id"`
-	Message   string `json:"message"`
+	SessionID string        `json:"session_id"`
+	Message   string        `json:"message"`
+	Model     string        `json:"model"`
+	Files     []ChatFileRef `json:"files,omitempty"`
+}
+
+// ChatFileRef represents a reference to an uploaded file
+type ChatFileRef struct {
+	FileName string `json:"file_name"`
+	FilePath string `json:"file_path"`
+	FileType string `json:"file_type"` // attachment|template
 }
 
 // ChatResponse represents an AI chat response
@@ -71,50 +87,58 @@ func AiChat(ctx iris.Context) {
 	fmt.Fprintf(writer, "event: session\ndata: %s\n\n", sessionID)
 	writer.Flush()
 
-	template := `{"api_key": "your-api-key","model": "deepseek-chat","base_url": "https://api.deepseek.com","max_tokens": 4096,"temperature": 0.7,"timeout_seconds": 60,"max_retries": 3}`
+	defaultSite := provider.CurrentSite(nil)
 
-	if strings.HasPrefix(req.Message, "config:") {
-		var cfg eino.Config
-		tmpString := strings.TrimPrefix(req.Message, "config:")
-		if err := json.Unmarshal([]byte(tmpString), &cfg); err == nil && cfg.APIKey != "" {
-			// 保存到 setting 表
-			if err := currentSite.SaveSettingValue(provider.AiSettingKey, cfg); err != nil {
-				slog.Error("Failed to save AI setting", "error", err)
-				sendSSEWarning(writer, "保存AI配置失败: "+err.Error())
-				return
+	oldCfg := eino.GlobalConfig()
+	if req.Model != "" {
+		tplIdx, found := strings.CutPrefix(req.Model, "custom:")
+		if found {
+			aiSetting := defaultSite.LoadAiSetting("")
+			idx, _ := strconv.Atoi(tplIdx)
+			if idx >= 0 && idx < len(aiSetting.Configs) {
+				cfg := aiSetting.Configs[idx]
+				if oldCfg == nil || cfg.APIKey != oldCfg.APIKey {
+					// 配置已更新，重新设置AI接口
+					slog.Info("AI client initialized with updated config")
+					if err := eino.SetGlobalConfig(cfg); err != nil {
+						slog.Error("Failed to initialize AI client with provided config", "error", err)
+						sendSSEWarning(writer, "AI配置无效: "+err.Error())
+						return
+					}
+					// 配置成功
+					oldCfg = cfg
+					aiSetting.LastModel = req.Model
+					defaultSite.SaveSettingValue(provider.AiSettingKey, aiSetting)
+				}
 			}
-			// 初始化AI客户端
-			if err := eino.SetGlobalConfig(&cfg); err != nil {
-				slog.Error("Failed to initialize AI client with provided config", "error", err)
-				sendSSEWarning(writer, "AI配置无效: "+err.Error())
-				return
+		} else {
+			// 选择的是官方模型
+			if config.AnqiUser.AuthId > 0 {
+				if req.Model != "anqi-flash" && req.Model != "anqi-pro" {
+					req.Model = "anqi-flash"
+				}
+				if req.Model != oldCfg.Model {
+					// 配置已更新，重新设置AI接口
+					if err := eino.SetOfficialConfig(req.Model); err != nil {
+						slog.Error("Failed to initialize AI client", "error", err)
+					} else {
+						slog.Info("AI client initialized successfully")
+					}
+					aiSetting := defaultSite.LoadAiSetting("")
+					aiSetting.LastModel = req.Model
+					defaultSite.SaveSettingValue(provider.AiSettingKey, aiSetting)
+				}
+			} else {
+				sendSSEWarning(writer, "请先绑定安企账号，后开始使用AI助手")
 			}
-			slog.Info("AI client initialized with config from message")
-			// 清空 message，避免将配置内容当作聊天消息处理
-			warningData, _ := json.Marshal(iris.Map{
-				"v":         "已添加AI配置",
-				"timestamp": time.Now().Unix(),
-			})
-			fmt.Fprintf(writer, "event: message\ndata: %s\n\n", string(warningData))
-			writer.Flush()
-			return
 		}
 	}
 
 	// 设置AI
-	setting := eino.GlobalConfig()
-	if setting == nil {
+	if oldCfg == nil {
 		// 未检测到有效配置，返回 JSON 模板提示
-		sendSSEWarning(writer, "AI接口尚未配置或配置错误。请将以上 JSON 配置（替换为你自己的 api_key）作为消息内容发送以完成配置")
-		fmt.Fprintf(writer, "event: config\ndata: %s\n\n", template)
-		writer.Flush()
-		return
-	}
-	// 接受配置信息提示
-	if req.Message == "/config" || req.Message == "/设置" {
-		// 显示配置信息
-		sendSSEWarning(writer, "请将以上 JSON 配置（替换为你自己的 api_key）作为消息内容发送以完成配置")
-		fmt.Fprintf(writer, "event: config\ndata: %s\n\n", template)
+		sendSSEWarning(writer, "AI接口尚未配置或配置错误。")
+		fmt.Fprintf(writer, "event: config\ndata: %s\n\n", "{}")
 		writer.Flush()
 		return
 	}
@@ -148,10 +172,84 @@ func AiChat(ctx iris.Context) {
 		}
 	}
 
+	// 处理上传的文件附件：读取内容并追加到用户消息
+	if len(req.Files) > 0 {
+		var fileParts []string
+		for _, f := range req.Files {
+			fullPath := filepath.Join(currentSite.RootPath, f.FilePath)
+			info, err := os.Stat(fullPath)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			// 通过 MIME type 判断文件类型
+			ext := strings.ToLower(filepath.Ext(f.FileName))
+			mimeType := mime.TypeByExtension(ext)
+			if mimeType == "" {
+				// 扩展名未知时，读取文件开头内容推断是否为文本
+				header := make([]byte, 2048)
+				fh, err := os.Open(fullPath)
+				if err == nil {
+					n, _ := fh.Read(header)
+					fh.Close()
+					if n > 0 {
+						header = header[:n]
+						// 不含空字节且UTF-8可解码 → 视为文本
+						if !bytes.Contains(header, []byte{0}) {
+							mimeType = "text/plain"
+						} else {
+							mimeType = "application/octet-stream"
+						}
+					}
+				}
+			}
+
+			if f.FileType == "template" || strings.HasPrefix(mimeType, "text/") ||
+				strings.HasSuffix(mimeType, "+xml") ||
+				mimeType == "application/json" ||
+				mimeType == "application/javascript" ||
+				mimeType == "application/xml" ||
+				mimeType == "application/x-yaml" ||
+				mimeType == "application/x-sh" ||
+				mimeType == "application/sql" {
+				// 文本文件：读取内容
+				data, err := os.ReadFile(fullPath)
+				if err != nil {
+					continue
+				}
+				content := string(data)
+				if len([]rune(content)) > 8000 {
+					content = string([]rune(content)[:8000]) + "\n... [文件过长，仅显示前8000字符]"
+				}
+				if f.FileType == "template" {
+					fileParts = append(fileParts, fmt.Sprintf("[模板文件: %s](本地路径: %s)\n---\n%s\n---", f.FileName, f.FilePath, content))
+				} else {
+					fileParts = append(fileParts, fmt.Sprintf("[文件: %s](本地路径: %s)\n---\n%s\n---", f.FileName, f.FilePath, content))
+				}
+			} else if strings.HasPrefix(mimeType, "image/") {
+				fileParts = append(fileParts, fmt.Sprintf("[图片: %s] (%.1f KB, 本地路径: %s)", f.FileName, float64(info.Size())/1024, f.FilePath))
+			} else {
+				fileParts = append(fileParts, fmt.Sprintf("[附件: %s] (%.1f KB, 本地路径: %s, 类型: %s)", f.FileName, float64(info.Size())/1024, f.FilePath, mimeType))
+			}
+		}
+		if len(fileParts) > 0 {
+			message = strings.Join(fileParts, "\n\n") + "\n\n" + message
+		}
+	}
+
 	// Add user message to history
+	var chatFiles []provider.ChatFileRef
+	if len(req.Files) > 0 {
+		for _, f := range req.Files {
+			chatFiles = append(chatFiles, provider.ChatFileRef{
+				FileName: f.FileName,
+				FilePath: f.FilePath,
+			})
+		}
+	}
 	currentSite.AiSrv.AddMessage(sessionID, provider.ChatMessage{
 		Role:    "user",
 		Content: message,
+		Files:   chatFiles,
 	})
 
 	requestCtx := ctx.Request().Context()
@@ -161,8 +259,8 @@ func AiChat(ctx iris.Context) {
 	if err != nil {
 		slog.Error("AI response generation failed", "error", err)
 		if strings.Contains(err.Error(), "401") {
-			sendSSEWarning(writer, "AI接口尚未配置或配置错误。请将以上 JSON 配置（替换为你自己的 api_key）作为消息内容发送以完成配置")
-			fmt.Fprintf(writer, "event: config\ndata: %s\n\n", template)
+			sendSSEWarning(writer, "AI接口尚未配置或配置错误。")
+			fmt.Fprintf(writer, "event: config\ndata: %s\n\n", "{}")
 			writer.Flush()
 			return
 		}
@@ -172,7 +270,6 @@ func AiChat(ctx iris.Context) {
 		for _, tool := range allTools {
 			toolNames = append(toolNames, fmt.Sprintf("- %s: %s", tool.Name, tool.Description))
 		}
-		currentSite := provider.CurrentSite(ctx)
 		response = currentSite.AiSrv.BuildAIResponse(message, toolNames)
 	}
 
@@ -200,63 +297,92 @@ func generateAIResponse(ctx context.Context, irisCtx iris.Context, sessionID str
 		return "", fmt.Errorf("AI client not available: %w", err)
 	}
 
-	// ── Step 1 + 2: 构建系统提示（含诊断信息、工作流指导） ──
-	systemPrompt := `你是一个专业的 AnQiCMS 网站内容管理 AI 助手，帮助用户管理文章、分类、标签和附件。
-
-## 工作流
-请遵循以下步骤完成每个任务：
-1. **先规划**：了解用户需求后，确定需要使用的工具和步骤，不要盲目操作。
-2. **再执行**：按计划调用工具完成任务。
-3. **验证**：执行修改操作后，运行验证工具（如 bash 执行构建/检查命令）确认修改正确。
-4. **总结**：验证通过后，用中文总结完成的操作和结果。
-
-## 可用工具
-### 内容管理
-- archive_create / archive_list / archive_get / archive_update / archive_delete / archive_tag_update / archive_publish: 文章管理
-- category_create / category_list / category_get / category_update / category_delete: 分类管理
-- page_create / page_list / page_get / page_update / page_delete: 页面管理
-- module_create / module_list / module_get / module_update / module_delete: 模型管理
-- tag_create / tag_list / tag_get / tag_update / tag_delete: 标签管理
-- attachment_list / attachment_upload / attachment_delete: 附件管理
-
-### 文件与代码
-- read_file / write_file / edit_file / search_replace: 文件操作
-- bash: 运行 shell 命令（编译、测试等）
-- grep / glob / list_directory: 搜索和浏览项目文件
-- web_fetch / web_search: 互联网搜索
-- list_symbols / read_symbol / find_references: Go 代码分析
-- call_graph / file_deps: 代码依赖和调用关系
-
-## 使用指南
-- 在创建文章时，先查看可用分类（使用 category_list 工具），然后选择合适的分类ID。
-- 在创建分类时，先查看可用模型（使用 module_list 工具），然后选择合适的模型ID。
-- 请用中文回复，保持专业、友好的语气。
-- 执行了修改操作（创建/更新/删除）后，先验证再继续下一步。
-
-## 技能系统(Skills)
-- skill_list: 列出所有可用技能。当用户任务需要专业指导时先调用此工具。
-- skill_get: 加载指定技能的完整内容。先确认技能匹配再调用。
-- skill_reload: 管理员编辑技能后使用。
-处理专业任务时，先查看可用技能，再加载匹配的技能内容并遵循其指导。
-
-用户的操作都会在当前站点中执行，请根据实际情况使用工具。`
-
+	// ── Step 1: 构建系统提示（每会话缓存一次，保持 prefix cache 稳定） ──
+	// 参考 AtomCode 的做法：system prompt 只构建一次，后续复用
 	currentSite := provider.CurrentSite(irisCtx)
-	if currentSite != nil {
-		systemPrompt += fmt.Sprintf("\n\n当前站点：%s", currentSite.System.SiteName)
+
+	// 从 session 获取缓存的 system prompt，仅在首次构建
+	sess := currentSite.AiSrv.GetOrCreateSession(sessionID)
+	systemPrompt := sess.CachedSystemPrompt
+	if systemPrompt == "" {
+		systemPrompt = buildSystemPrompt()
+		// 附加能力包声明指引（仅首次，随 system prompt 一起缓存）
+		declarationGuide := "\n\n## 能力包声明\n你必须首先调用 declare_capability_packages 工具，声明本次对话需要的能力包，然后才能使用其他工具。可用能力包：content（内容管理）、structure（结构管理）、design（模板设计）、seo（SEO优化）、admin（系统管理）、agent（智能体管理）、universal（通用工具）。根据用户请求选择合适的能力包组合。\n\n### 能力包说明\n- content: 文档创建/编辑/发布、分类管理、标签管理、附件管理、评论管理\n- structure: 页面管理、导航管理、友链管理、模块管理、重定向管理\n- design: 模板文件编辑、样式修改、锚文本管理\n- seo: 关键词管理、站点地图、搜索引擎统计\n- admin: 系统设置、插件管理、用户管理、订单管理、缓存管理\n- agent: 智能体管理\n- universal: 始终可用。文件读写、Shell、搜索、网站信息等"
+		systemPrompt = strings.Replace(systemPrompt, "用户的操作都会在当前站点中执行", declarationGuide+"\n\n用户的操作都会在当前站点中执行", 1)
+		sess.CachedSystemPrompt = systemPrompt
 	}
 
 	// ── Step 2: 上下文构建（带智能窗口压缩） ──
 	messages := currentSite.AiSrv.BuildToolMessages(sessionID, systemPrompt)
 
 	// Add current user message
-	messages = append(messages, schema.UserMessage(userMessage))
+	userMsg := userMessage
+	if currentSite != nil {
+		// 将站点动态信息放在 user message 前，不污染 system prompt 缓存
+		userMsg = fmt.Sprintf("[当前站点：%s]\n%s", currentSite.System.SiteName, userMessage)
+	}
+	messages = append(messages, schema.UserMessage(userMsg))
 
-	// Bind tools to the client
-	if len(currentSite.AiSrv.Tools) > 0 {
-		if err := client.BindTools(currentSite.AiSrv.Tools); err != nil {
-			return "", fmt.Errorf("failed to bind tools: %w", err)
+	// ── 能力包机制：按需绑定工具 ──
+	// 未声明的会话先绑定摘要工具（精简参数），模型需先调用 declare_capability_packages
+	// 已声明的会话直接绑定该能力包的完整工具定义
+	if !sess.ToolsFinalized {
+		summaryTools := currentSite.AiSrv.GetEinoToolsSummary()
+		declareTool := provider.BuildDeclareTool()
+		allBindTools := append(summaryTools, declareTool)
+
+		// 注入声明工具 handler，捕获 client 和 sess 以完成工具切换
+		currentSite.AiSrv.Handlers["declare_capability_packages"] = func(ctx context.Context, argsJSON string) (string, error) {
+			var declareReq struct {
+				Packages []string `json:"packages"`
+			}
+			if err := json.Unmarshal([]byte(argsJSON), &declareReq); err != nil {
+				return "", fmt.Errorf("声明格式错误: %s", err.Error())
+			}
+			if len(declareReq.Packages) == 0 {
+				return "", fmt.Errorf("必须至少声明一个能力包")
+			}
+			// 去重
+			seen := map[string]bool{}
+			var pkgs []string
+			for _, p := range declareReq.Packages {
+				if !seen[p] {
+					seen[p] = true
+					pkgs = append(pkgs, p)
+				}
+			}
+			sess.DeclaredPackages = pkgs
+			sess.ToolsFinalized = true
+			slog.Info("Capability packages declared", "session", sessionID, "packages", pkgs)
+
+			// 切换为完整的工具集
+			filteredTools, filteredHandlers := currentSite.AiSrv.GetToolsByCapabilityPackages(pkgs)
+			if err := client.BindTools(filteredTools); err != nil {
+				return "", fmt.Errorf("工具绑定失败: %s", err.Error())
+			}
+			// 更新 handler 映射，保留 declare 工具以支持重新声明
+			currentSite.AiSrv.Handlers = filteredHandlers
+			currentSite.AiSrv.Handlers["declare_capability_packages"] = func(ctx context.Context, argsJSON string) (string, error) {
+				return "能力包已更新", nil
+			}
+			slog.Info("Switched to full tools", "session", sessionID, "count", len(filteredTools))
+			return fmt.Sprintf("能力包已确认：%s。现在可以使用这些能力包中的全部工具。", strings.Join(pkgs, ", ")), nil
 		}
+
+		if err := client.BindTools(allBindTools); err != nil {
+			return "", fmt.Errorf("failed to bind summary tools: %w", err)
+		}
+		slog.Info("Using summary tools for capability declaration",
+			"session", sessionID, "tools", len(allBindTools))
+	} else {
+		filteredTools, filteredHandlers := currentSite.AiSrv.GetToolsByCapabilityPackages(sess.DeclaredPackages)
+		if err := client.BindTools(filteredTools); err != nil {
+			return "", fmt.Errorf("failed to bind filtered tools: %w", err)
+		}
+		// 同步更新 handler 映射
+		currentSite.AiSrv.Handlers = filteredHandlers
+		slog.Info("Using filtered tools for execution",
+			"session", sessionID, "packages", sess.DeclaredPackages, "tools", len(filteredTools))
 	}
 
 	// ── 7步验证工作流主循环 ──
@@ -268,7 +394,8 @@ func generateAIResponse(ctx context.Context, irisCtx iris.Context, sessionID str
 	var executedTools []string // Step 4: 本轮已执行工具列表
 	var hadWriteOperation bool // Step 4: 是否执行过写操作
 	var totalTokens int        // Token 统计
-	contextCompactCalls := 0   // 上下文压缩计数
+	var totalPromptTokens, totalCompletionTokens int
+	contextCompactCalls := 0 // 上下文压缩计数
 
 	for round = 0; round < maxRounds; round++ {
 		// ── Step 5: 错误恢复 — 重试循环 ──
@@ -361,6 +488,8 @@ func generateAIResponse(ctx context.Context, irisCtx iris.Context, sessionID str
 		stream.Close()
 
 		totalTokens += promptTokens + completionTokens
+		totalPromptTokens += promptTokens
+		totalCompletionTokens += completionTokens
 
 		// Merge all tool call chunks accumulated during streaming.
 		// Individual chunks contain partial data (e.g. empty ID, split Arguments),
@@ -538,6 +667,19 @@ func generateAIResponse(ctx context.Context, irisCtx iris.Context, sessionID str
 		}
 	}
 
+	// Send token usage via SSE
+	if writer != nil && totalTokens > 0 {
+		usageData, _ := json.Marshal(iris.Map{
+			"prompt_tokens":     totalPromptTokens,
+			"completion_tokens": totalCompletionTokens,
+			"total_tokens":      totalTokens,
+		})
+		fmt.Fprintf(writer, "event: usage\ndata: %s\n\n", string(usageData))
+		if f, ok := writer.(interface{ Flush() error }); ok {
+			f.Flush()
+		}
+	}
+
 	// 统计日志
 	slog.Info("AI response completed",
 		"rounds", round+1,
@@ -636,6 +778,25 @@ func GetAiHistory(ctx iris.Context) {
 	})
 }
 
+// GetAiSessions returns all chat sessions list
+func GetAiSessions(ctx iris.Context) {
+	currentSite := provider.CurrentSubSite(ctx)
+	if currentSite.AiSrv == nil {
+		ctx.JSON(iris.Map{
+			"code": -1,
+			"msg":  "ai service not available",
+		})
+		return
+	}
+
+	sessions := currentSite.AiSrv.ListSessions()
+	ctx.JSON(iris.Map{
+		"code": 0,
+		"msg":  "success",
+		"data": sessions,
+	})
+}
+
 // Health returns health status
 func AiHealth(ctx iris.Context) {
 	currentSite := provider.CurrentSubSite(ctx)
@@ -654,4 +815,228 @@ func AiHealth(ctx iris.Context) {
 			"status":  "running",
 		},
 	})
+}
+
+// AiChatUpload 上传临时文件供AI对话使用
+func AiChatUpload(ctx iris.Context) {
+	currentSite := provider.CurrentSubSite(ctx)
+
+	file, info, err := ctx.FormFile("file")
+	if err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  err.Error(),
+		})
+		return
+	}
+	defer file.Close()
+
+	sessionID := ctx.PostValueDefault("session_id", "common")
+	// 生成唯一文件名: 时间戳_原始文件名
+	ext := filepath.Ext(info.Filename)
+	baseName := strings.TrimSuffix(info.Filename, ext)
+	saveName := fmt.Sprintf("%d_%s%s", time.Now().UnixNano(), baseName, ext)
+
+	// 保存到临时目录: CachePath/ai/upload/{sessionID}/
+	uploadDir := filepath.Join(currentSite.CachePath, "ai", "upload", sessionID)
+	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("DirectoryCreationFailed"),
+		})
+		return
+	}
+
+	savePath := filepath.Join(uploadDir, saveName)
+	dst, err := os.Create(savePath)
+	if err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("FileSaveFailed"),
+		})
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  ctx.Tr("FileSaveFailed"),
+		})
+		return
+	}
+
+	// 返回保存的相对路径，
+	filePath := strings.TrimPrefix(savePath, currentSite.RootPath)
+
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "success",
+		"data": iris.Map{
+			"file_name":  info.Filename,
+			"file_size":  info.Size,
+			"file_path":  filePath,
+			"session_id": sessionID,
+			"file_ext":   ext,
+		},
+	})
+}
+
+// GetAiSettings returns all custom AI provider configs
+func GetAiSettings(ctx iris.Context) {
+	// 使用默认站点处理
+	defaultSite := provider.CurrentSite(nil)
+
+	settings := defaultSite.LoadAiSetting("")
+
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "success",
+		"data": settings,
+	})
+}
+
+// SaveAiSettings saves a custom AI provider config (add or update or delete)
+// need to provide full config
+func SaveAiSettings(ctx iris.Context) {
+	defaultSite := provider.CurrentSite(nil)
+	var req []*eino.Config
+	if err := ctx.ReadJSON(&req); err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  "invalid request",
+		})
+		return
+	}
+
+	settings := defaultSite.LoadAiSetting("")
+	settings.Configs = req
+
+	if err := defaultSite.SaveSettingValue(provider.AiSettingKey, settings); err != nil {
+		ctx.JSON(iris.Map{
+			"code": config.StatusFailed,
+			"msg":  "save failed",
+		})
+		return
+	}
+
+	// cache new setting
+	defaultSite.Cache.Set("ai_setting", settings, 86400)
+
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "success",
+		"data": settings,
+	})
+}
+
+// AiAgentList 返回所有 AI 智能体列表
+func AiAgentList(ctx iris.Context) {
+	currentSite := provider.CurrentSubSite(ctx)
+	var agents []model.AiAgent
+	currentSite.DB.Order("id ASC").Find(&agents)
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "success",
+		"data": agents,
+	})
+}
+
+// AiAgentLog 返回指定 Agent 的执行日志
+func AiAgentLog(ctx iris.Context) {
+	currentSite := provider.CurrentSubSite(ctx)
+	currentPage := ctx.URLParamIntDefault("current", 1)
+	pageSize := ctx.URLParamIntDefault("pageSize", 20)
+	agentId, err := ctx.Params().GetUint("id")
+	if err != nil {
+		ctx.JSON(iris.Map{"code": config.StatusFailed, "msg": "ID无效"})
+		return
+	}
+	offset := (currentPage - 1) * pageSize
+	var total int64
+
+	var logs []model.AiAgentLog
+	currentSite.DB.Where("agent_id = ?", agentId).Order("id DESC").Count(&total).Limit(pageSize).Offset(offset).Find(&logs)
+	ctx.JSON(iris.Map{
+		"code": config.StatusOK,
+		"msg":  "success",
+		"data": logs,
+	})
+}
+
+// AiAgentChat 与 AI 智能体的专属会话对话（SSE 流式）
+func AiAgentChat(ctx iris.Context) {
+	currentSite := provider.CurrentSubSite(ctx)
+	if currentSite.AiSrv == nil {
+		ctx.JSON(iris.Map{"code": -1, "msg": "ai service not available"})
+		return
+	}
+	agentId, err := ctx.Params().GetUint("id")
+	if err != nil {
+		ctx.JSON(iris.Map{"code": config.StatusFailed, "msg": "ID无效"})
+		return
+	}
+
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := ctx.ReadJSON(&req); err != nil || req.Message == "" {
+		ctx.JSON(iris.Map{"code": config.StatusFailed, "msg": "消息不能为空"})
+		return
+	}
+
+	// 查找 Agent
+	agent := currentSite.AiSrv.GetAgent(agentId)
+	if agent == nil {
+		ctx.JSON(iris.Map{"code": config.StatusFailed, "msg": "智能体不存在"})
+		return
+	}
+
+	// SSE 流式输出
+	ctx.ContentType("text/event-stream")
+	ctx.Header("Cache-Control", "no-cache")
+	ctx.Header("Connection", "keep-alive")
+	writer := ctx.ResponseWriter()
+
+	// 构建系统提示
+	systemPrompt := "你是 AnQiCMS 的 AI 智能体。以下是你的策略和对话历史。用户正在与你对话。"
+	if agent.Strategy != "" {
+		systemPrompt += "\n\n## 你的策略\n" + agent.Strategy
+	}
+	if agent.LastSummary != "" {
+		systemPrompt += "\n\n## 上次执行摘要\n" + agent.LastSummary
+	}
+
+	// 复用主对话的生成逻辑，使用 agent 的 session
+	_, err = generateAIResponse(ctx, ctx, agent.SessionId, req.Message, writer)
+	if err != nil {
+		slog.Error("Agent chat failed", "agent_id", agentId, "error", err)
+	}
+}
+
+// buildSystemPrompt returns the session-level system prompt (static text).
+// The caller caches it on the ChatSession so messages[0] stays byte-identical
+// across turns, preserving the upstream provider's prefix cache.
+func buildSystemPrompt() string {
+	return `你是一个专业的 AnQiCMS 网站内容管理 AI 助手，帮助用户管理文章、分类、标签和附件。
+
+## 工作流
+请遵循以下步骤完成每个任务：
+1. **先规划**：了解用户需求后，确定需要使用的工具和步骤，不要盲目操作。
+2. **再执行**：按计划调用工具完成任务。
+3. **验证**：执行修改操作后，运行验证工具（如 bash 执行构建/检查命令）确认修改正确。
+4. **总结**：验证通过后，用中文总结完成的操作和结果。
+
+## 使用指南
+- 在创建文章时，先查看可用分类（使用 category_list 工具），然后选择合适的分类ID。
+- 在创建分类时，先查看可用模型（使用 module_list 工具），然后选择合适的模型ID。
+- 请用中文回复，保持专业、友好的语气。
+- 执行了修改操作（创建/更新/删除）后，先验证再继续下一步。
+
+## 技能系统(Skills)
+- skill_list: 列出所有可用技能。当用户任务需要专业指导时先调用此工具。
+- skill_get: 加载指定技能的完整内容。先确认技能匹配再调用。
+- skill_reload: 管理员编辑技能后使用。
+处理专业任务时，先查看可用技能，再加载匹配的技能内容并遵循其指导。
+	用户的操作都会在当前站点中执行，请根据实际情况使用工具。`
 }
