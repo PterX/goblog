@@ -522,6 +522,45 @@ func (s *DjangoEngine) ExecuteWriter(w io.Writer, filename string, _ string, bin
 				})
 			}
 		}
+		// 对开启了全站复用城市分站模式，进行URL替换
+		if currentSite.PluginPlace.Open && currentSite.PluginPlace.ContentType == config.PlaceContentTypeFull {
+			// 获取当前城市
+			dataMap, ok := bindingData.(map[string]interface{})
+			if ok {
+				var urlPrefix string
+				baseUrl := currentSite.System.BaseUrl
+				place, ok := dataMap["place"].(*model.Place)
+				if ok {
+					if currentSite.PluginPlace.UrlType == config.PlaceUrlTypeSubdomain {
+						//
+						topDomain := strings.SplitN(currentSite.Host, ".", 2)[1]
+						if strings.Count(currentSite.Host, ".") == 1 {
+							topDomain = currentSite.Host
+						}
+						urlPrefix = currentSite.Scheme + "://" + place.UrlToken + "." + topDomain
+					} else {
+						urlPrefix = baseUrl + "/" + place.UrlToken
+					}
+				}
+				// 开始 replace
+				if baseUrl != "" {
+					placeUrl := []byte(urlPrefix)
+					baseUrlBytes := []byte(baseUrl)
+					escapedBaseUrl := regexp.QuoteMeta(baseUrl)
+					re, ok := mobileReplaceRegexCache.Load(baseUrl)
+					if !ok {
+						re, _ = regexp.Compile(mobileIgnoreTagsPart + `|(?is)<a[^>]*href=["']` + escapedBaseUrl + `[^'"]*["'][^>]*>.*?</a>`)
+						mobileReplaceRegexCache.Store(baseUrl, re)
+					}
+					data = re.(*regexp.Regexp).ReplaceAllFunc(data, func(match []byte) []byte {
+						if bytes.HasPrefix(match, []byte("<a")) {
+							return bytes.ReplaceAll(match, baseUrlBytes, placeUrl)
+						}
+						return match
+					})
+				}
+			}
+		}
 		// 添加json-ld
 		if currentSite.PluginJsonLd.Open {
 			// 需要先检查页面是否存在ls+json,如果已存在，则不再添加
