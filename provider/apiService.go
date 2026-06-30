@@ -145,7 +145,11 @@ func (w *Website) ApiGetArchive(req *request.ApiArchiveRequest) (*model.Archive,
 					value, _ = strconv.ParseInt(fmt.Sprint(param.Default), 10, 64)
 				}
 				if value > 0 {
-					param.Value = w.GetCategoryFromCache(uint(value))
+					category := w.GetCategoryFromCache(uint(value))
+					if category.Link == "" {
+						category.Link = w.GetUrl("category", category, 0)
+					}
+					param.Value = category
 				} else {
 					param.Value = nil
 				}
@@ -856,7 +860,11 @@ func (w *Website) ApiGetArchives(req *request.ApiArchiveListRequest) ([]*model.A
 								value, _ = strconv.ParseInt(fmt.Sprint(param.Default), 10, 64)
 							}
 							if value > 0 {
-								param.Value = w.GetCategoryFromCache(uint(value))
+								category := w.GetCategoryFromCache(uint(value))
+								if category.Link == "" {
+									category.Link = w.GetUrl("category", category, 0)
+								}
+								param.Value = category
 							} else {
 								param.Value = nil
 							}
@@ -1117,7 +1125,11 @@ func (w *Website) ApiGetArchiveParams(req *request.ApiArchiveRequest) ([]config.
 					value, _ = strconv.ParseInt(fmt.Sprint(param.Default), 10, 64)
 				}
 				if value > 0 {
-					param.Value = w.GetCategoryFromCache(uint(value))
+					category := w.GetCategoryFromCache(uint(value))
+					if category.Link == "" {
+						category.Link = w.GetUrl("category", category, 0)
+					}
+					param.Value = category
 				} else {
 					param.Value = nil
 				}
@@ -1149,7 +1161,9 @@ func (w *Website) ApiGetCategory(req *request.ApiCategoryRequest) (*model.Catego
 	if category == nil {
 		return nil, errors.New("no category found")
 	}
-
+	if category.Link == "" {
+		category.Link = w.GetUrl("category", category, 0)
+	}
 	frontUrl := w.System.BaseUrl
 	if w.System.FrontUrl != "" {
 		frontUrl = w.System.FrontUrl
@@ -1224,7 +1238,11 @@ func (w *Website) ApiGetCategory(req *request.ApiCategoryRequest) (*model.Catego
 						value, _ = strconv.ParseInt(fmt.Sprint(field.Content), 10, 64)
 					}
 					if value > 0 {
-						categoryExtra[field.FieldName] = w.GetCategoryFromCache(uint(value))
+						category := w.GetCategoryFromCache(uint(value))
+						if category.Link == "" {
+							category.Link = w.GetUrl("category", category, 0)
+						}
+						categoryExtra[field.FieldName] = category
 					} else {
 						categoryExtra[field.FieldName] = nil
 					}
@@ -1347,7 +1365,11 @@ func (w *Website) ApiGetTag(req *request.ApiTagRequest) (*model.Tag, error) {
 							value, _ = strconv.ParseInt(fmt.Sprint(field.Content), 10, 64)
 						}
 						if value > 0 {
-							tagDetail.Extra[field.FieldName] = w.GetCategoryFromCache(uint(value))
+							category := w.GetCategoryFromCache(uint(value))
+							if category.Link == "" {
+								category.Link = w.GetUrl("category", category, 0)
+							}
+							tagDetail.Extra[field.FieldName] = category
 						} else {
 							tagDetail.Extra[field.FieldName] = nil
 						}
@@ -1698,7 +1720,11 @@ func (w *Website) ApiGetDiyFields(render bool) []config.CustomField {
 				value, _ = strconv.ParseInt(fmt.Sprint(field.Content), 10, 64)
 			}
 			if value > 0 {
-				field.Value = w.GetCategoryFromCache(uint(value))
+				category := w.GetCategoryFromCache(uint(value))
+				if category.Link == "" {
+					category.Link = w.GetUrl("category", category, 0)
+				}
+				field.Value = category
 			} else {
 				field.Value = nil
 			}

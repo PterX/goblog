@@ -457,6 +457,9 @@ func (w *Website) GetParentCategories(parentId uint) []*model.Category {
 		if category == nil {
 			break
 		}
+		if category.Link == "" {
+			category.Link = w.GetUrl("category", category, 0)
+		}
 		categories = append(categories, category)
 		parentId = category.ParentId
 	}
@@ -565,9 +568,6 @@ func (w *Website) GetCategoryFromCache(categoryId uint) *model.Category {
 	categories := w.GetCacheCategories()
 	for i := range categories {
 		if categories[i].Id == categoryId {
-			if categories[i].Link == "" {
-				categories[i].Link = w.GetUrl("category", categories[i], 0)
-			}
 			return categories[i]
 		}
 	}

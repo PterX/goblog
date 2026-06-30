@@ -900,6 +900,9 @@ func (w *Website) buildCrumbs(viewData map[string]interface{}, webInfo *response
 			if category.Parents != nil {
 				for _, parent := range category.Parents {
 					parentCat := w.GetCategoryFromCache(parent.Id)
+					if parentCat.Link == "" {
+						parentCat.Link = w.GetUrl("category", parentCat, 0)
+					}
 					crumbs = append(crumbs, iris.Map{
 						"name": parentCat.Title,
 						"link": parentCat.Link,
